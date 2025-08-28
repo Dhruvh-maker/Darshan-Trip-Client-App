@@ -15,6 +15,11 @@ class BookingsViewModel extends ChangeNotifier {
   String? get error => _error;
   List<Map<String, dynamic>> get bookings => _bookings;
   Map<String, dynamic>? get operatorPolicy => _operatorPolicy;
+  Map<String, dynamic>? _modifyPolicy;
+  Map<String, dynamic>? _cancelPolicy;
+
+  Map<String, dynamic>? get modifyPolicy => _modifyPolicy;
+  Map<String, dynamic>? get cancelPolicy => _cancelPolicy;
 
   /// Fetch operator policy from Firestore
   Future<void> fetchOperatorPolicy() async {
@@ -40,6 +45,133 @@ class BookingsViewModel extends ChangeNotifier {
       };
     }
     notifyListeners();
+  }
+
+  Future<void> fetchModifyPolicy() async {
+    try {
+      final snapshot = await _firestore
+          .collection('policies')
+          .where('title', isEqualTo: 'modifypolicy')
+          .limit(1)
+          .get();
+
+      if (snapshot.docs.isNotEmpty) {
+        _modifyPolicy = snapshot.docs.first.data();
+      } else {
+        // Create default modify policy if not exists
+        await _createDefaultModifyPolicy();
+      }
+    } catch (e) {
+      print('❌ Error fetching modify policy: $e');
+      _modifyPolicy = {
+        'title': 'modifypolicy',
+        'content': _getDefaultModifyPolicyContent(),
+      };
+    }
+    notifyListeners();
+  }
+
+  /// Fetch cancel policy from Firestore
+  Future<void> fetchCancelPolicy() async {
+    try {
+      final snapshot = await _firestore
+          .collection('policies')
+          .where('title', isEqualTo: 'cancelpolicy')
+          .limit(1)
+          .get();
+
+      if (snapshot.docs.isNotEmpty) {
+        _cancelPolicy = snapshot.docs.first.data();
+      } else {
+        // Create default cancel policy if not exists
+        await _createDefaultCancelPolicy();
+      }
+    } catch (e) {
+      print('❌ Error fetching cancel policy: $e');
+      _cancelPolicy = {
+        'title': 'cancelpolicy',
+        'content': _getDefaultCancelPolicyContent(),
+      };
+    }
+    notifyListeners();
+  }
+
+  Future<void> _createDefaultModifyPolicy() async {
+    try {
+      final defaultPolicy = {
+        'title': 'modifypolicy',
+        'content': _getDefaultModifyPolicyContent(),
+        'createdAt': FieldValue.serverTimestamp(),
+        'updatedAt': FieldValue.serverTimestamp(),
+      };
+
+      await _firestore.collection('policies').add(defaultPolicy);
+      _modifyPolicy = defaultPolicy;
+      print('✅ Default modify policy created');
+    } catch (e) {
+      print('❌ Error creating default modify policy: $e');
+    }
+  }
+
+  /// Create default cancel policy in Firestore
+  Future<void> _createDefaultCancelPolicy() async {
+    try {
+      final defaultPolicy = {
+        'title': 'cancelpolicy',
+        'content': _getDefaultCancelPolicyContent(),
+        'createdAt': FieldValue.serverTimestamp(),
+        'updatedAt': FieldValue.serverTimestamp(),
+      };
+
+      await _firestore.collection('policies').add(defaultPolicy);
+      _cancelPolicy = defaultPolicy;
+      print('✅ Default cancel policy created');
+    } catch (e) {
+      print('❌ Error creating default cancel policy: $e');
+    }
+  }
+
+  String _getDefaultModifyPolicyContent() {
+    return '''
+MODIFICATION POLICY (TEST VERSION)
+
+1. MODIFICATION RULES:
+• Unlimited modifications allowed
+• Changes to date, seats, or passenger details permitted
+• No fees for modifications in testing mode
+• Modifications must be made at least 2 hours before departure
+
+2. RESTRICTIONS:
+• Date changes limited to 1 per booking
+• Seat changes subject to availability
+
+3. PROCESS:
+• Changes processed instantly
+• Contact support for complex modifications
+
+For queries, contact: support@busoperator.com
+''';
+  }
+
+  /// Default cancel policy content
+  String _getDefaultCancelPolicyContent() {
+    return '''
+CANCELLATION POLICY (TEST VERSION)
+
+1. CANCELLATION RULES:
+• Cancellation allowed at any time
+• Full refund for all cancellations
+• No time restrictions in testing mode
+
+2. REFUND PROCESS:
+• Instant refunds
+• 100% refund guaranteed
+
+3. RESTRICTIONS:
+• None in testing mode
+
+For queries, contact: support@busoperator.com
+''';
   }
 
   /// Create default operator policy in Firestore
