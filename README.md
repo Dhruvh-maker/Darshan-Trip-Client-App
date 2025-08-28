@@ -1,4 +1,4 @@
-# darshan_trip
+# Darshan Trip
 
 A new Flutter project.
 
