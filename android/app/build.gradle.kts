@@ -30,7 +30,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.arkapps.darshan_trip"
+        applicationId = "com.arkapps.darshantrip"
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
