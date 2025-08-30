@@ -1,15 +1,37 @@
 import 'package:flutter/material.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'privacy_policy_screen.dart';
 import 'terms_conditions_screen.dart';
 
 class AboutScreen extends StatelessWidget {
   const AboutScreen({super.key});
 
+  Future<String?> _fetchAboutUs() async {
+    try {
+      final snapshot = await FirebaseFirestore.instance
+          .collection("policies")
+          .where("title", isEqualTo: "aboutus")
+          .limit(1)
+          .get();
+
+      if (snapshot.docs.isNotEmpty) {
+        return snapshot.docs.first["content"] as String?;
+      }
+      return null;
+    } catch (e) {
+      debugPrint("❌ Error fetching about us: $e");
+      return null;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text("About Darshan Trip"),
+        title: const Text(
+          "About Darshan Trip",
+          style: TextStyle(color: Colors.white),
+        ),
         centerTitle: true,
         elevation: 0,
         flexibleSpace: Container(
@@ -21,7 +43,7 @@ class AboutScreen extends StatelessWidget {
             ),
           ),
         ),
-        foregroundColor: Colors.white,
+        iconTheme: const IconThemeData(color: Colors.white),
       ),
       body: SingleChildScrollView(
         child: Padding(
@@ -45,7 +67,6 @@ class AboutScreen extends StatelessWidget {
               ),
               const SizedBox(height: 20),
 
-              // Title
               const Text(
                 'Darshan Trip',
                 style: TextStyle(
@@ -56,45 +77,44 @@ class AboutScreen extends StatelessWidget {
               ),
               const SizedBox(height: 10),
 
-              // About Card
-              Card(
-                elevation: 4,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(16),
-                ),
-                child: Padding(
-                  padding: const EdgeInsets.all(20.0),
-                  child: Column(
-                    children: const [
-                      Text(
-                        'We are Darshan Trip - your premier travel companion for journeys from Delhi NCR to Anandpur Dham.',
+              // 🔥 Firestore से About Us fetch
+              FutureBuilder<String?>(
+                future: _fetchAboutUs(),
+                builder: (context, snapshot) {
+                  if (snapshot.connectionState == ConnectionState.waiting) {
+                    return const Padding(
+                      padding: EdgeInsets.all(20.0),
+                      child: CircularProgressIndicator(),
+                    );
+                  }
+                  if (!snapshot.hasData || snapshot.data == null) {
+                    return const Text(
+                      "No About Us content available",
+                      textAlign: TextAlign.center,
+                      style: TextStyle(fontSize: 16, color: Colors.grey),
+                    );
+                  }
+
+                  return Card(
+                    elevation: 4,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.all(20.0),
+                      child: Text(
+                        snapshot.data!,
                         textAlign: TextAlign.center,
-                        style: TextStyle(fontSize: 16, height: 1.5),
+                        style: const TextStyle(fontSize: 16, height: 1.5),
                       ),
-                      SizedBox(height: 12),
-                      Text(
-                        'With us, you can check bus schedules, select your favorite bus, view seat layout, pay and get your bus ticket - All with a few taps!',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(fontSize: 16, height: 1.5),
-                      ),
-                      SizedBox(height: 12),
-                      Text(
-                        'Book with us for a quick and hassle-free bus booking experience!',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                          fontSize: 16,
-                          height: 1.5,
-                          color: Colors.blue,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
+                    ),
+                  );
+                },
               ),
+
               const SizedBox(height: 30),
 
-              // Buttons Section
+              // Buttons
               SizedBox(
                 width: double.infinity,
                 child: ElevatedButton.icon(

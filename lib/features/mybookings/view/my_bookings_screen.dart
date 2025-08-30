@@ -47,7 +47,7 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
           "My Bookings",
           style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
         ),
-        backgroundColor: const Color(0xFFF5A623),
+        backgroundColor: Colors.orange.shade600,
         elevation: 0,
         actions: [
           IconButton(
@@ -329,12 +329,6 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
                         case 'cancel':
                           _showCancelDialog(booking);
                           break;
-                        case 'policy':
-                          _showOperatorPolicy();
-                          break;
-                        case 'delete':
-                          _showDeleteDialog(booking);
-                          break;
                       }
                     },
                     itemBuilder: (BuildContext context) {
@@ -367,35 +361,6 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
                           ),
                         );
                       }
-                      if (_bookingsViewModel.canDeleteBooking(booking)) {
-                        items.add(
-                          const PopupMenuItem<String>(
-                            value: 'delete',
-                            child: Row(
-                              children: [
-                                Icon(Icons.delete, color: Colors.red, size: 18),
-                                SizedBox(width: 8),
-                                Text('Delete Booking'),
-                              ],
-                            ),
-                          ),
-                        );
-                      }
-                      if (items.isNotEmpty) {
-                        items.add(const PopupMenuDivider());
-                      }
-                      items.add(
-                        const PopupMenuItem<String>(
-                          value: 'policy',
-                          child: Row(
-                            children: [
-                              Icon(Icons.policy, color: Colors.grey, size: 18),
-                              SizedBox(width: 8),
-                              Text('View Policy'),
-                            ],
-                          ),
-                        ),
-                      );
                       return items;
                     },
                     icon: Icon(Icons.more_vert, color: Colors.grey.shade600),
@@ -557,7 +522,8 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
                           color: Colors.grey.shade600,
                         ),
                       ),
-                      if (booking['lastModifiedAt'] != null)
+                      if (booking['lastModifiedAt'] != null &&
+                          booking['lastModifiedAt'] is Timestamp)
                         Text(
                           'Modified: ${DateFormat('dd/MM/yyyy').format((booking['lastModifiedAt'] as Timestamp).toDate())}',
                           style: TextStyle(
@@ -569,43 +535,6 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
                   ),
                 ],
               ),
-              if (canCancelOrModify)
-                Padding(
-                  padding: const EdgeInsets.only(top: 16),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: OutlinedButton.icon(
-                          onPressed: () => _showModifyDialog(booking),
-                          icon: const Icon(Icons.edit, size: 16),
-                          label: const Text('Modify'),
-                          style: OutlinedButton.styleFrom(
-                            foregroundColor: Colors.blue,
-                            side: const BorderSide(color: Colors.blue),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: OutlinedButton.icon(
-                          onPressed: () => _showCancelDialog(booking),
-                          icon: const Icon(Icons.cancel, size: 16),
-                          label: const Text('Cancel'),
-                          style: OutlinedButton.styleFrom(
-                            foregroundColor: Colors.red,
-                            side: const BorderSide(color: Colors.red),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
             ],
           ),
         ),
@@ -634,130 +563,213 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
   }
 
   void _showModifyDialog(Map<String, dynamic> booking) {
-    final TextEditingController nameController = TextEditingController(
-      text: booking['passengerName']?.toString() ?? '',
-    );
-    final TextEditingController contactController = TextEditingController(
-      text: booking['passengerContact']?.toString() ?? '',
-    );
-    final TextEditingController pickupController = TextEditingController(
-      text: booking['pickupPoint']?.toString() ?? '',
-    );
+    final passengers =
+        (booking['passengers'] as List<dynamic>?)
+            ?.map((p) => Map<String, dynamic>.from(p))
+            .toList() ??
+        [];
+
+    final List<TextEditingController> nameControllers = passengers
+        .map((p) => TextEditingController(text: p['name']?.toString() ?? ''))
+        .toList();
+    final List<TextEditingController> contactControllers = passengers
+        .map((p) => TextEditingController(text: p['contact']?.toString() ?? ''))
+        .toList();
+    final List<TextEditingController> ageControllers = passengers
+        .map((p) => TextEditingController(text: p['age']?.toString() ?? ''))
+        .toList();
+    final List<TextEditingController> genderControllers = passengers
+        .map((p) => TextEditingController(text: p['gender']?.toString() ?? ''))
+        .toList();
 
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Modify Booking'),
-        content: SingleChildScrollView(
+      builder: (context) => Dialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        insetPadding: const EdgeInsets.all(16),
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(16),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              TextField(
-                controller: nameController,
-                decoration: const InputDecoration(
-                  labelText: 'Passenger Name',
-                  border: OutlineInputBorder(),
-                ),
+              const Text(
+                "Modify Booking",
+                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
               ),
               const SizedBox(height: 16),
-              TextField(
-                controller: contactController,
-                decoration: const InputDecoration(
-                  labelText: 'Contact Number',
-                  border: OutlineInputBorder(),
-                ),
-                keyboardType: TextInputType.phone,
-                maxLength: 10,
-              ),
-              const SizedBox(height: 16),
-              TextField(
-                controller: pickupController,
-                decoration: const InputDecoration(
-                  labelText: 'Pickup Point',
-                  border: OutlineInputBorder(),
-                ),
-              ),
-              const SizedBox(height: 16),
-              Consumer<BookingsViewModel>(
-                builder: (context, viewModel, child) {
-                  final policy = viewModel.modifyPolicy;
-                  if (policy == null) {
-                    return const Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        CircularProgressIndicator(),
-                        SizedBox(height: 16),
-                        Text('Loading modification policy...'),
-                      ],
-                    );
-                  }
 
-                  return Container(
+              // 🔹 Passenger forms
+              for (int i = 0; i < passengers.length; i++) ...[
+                Card(
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  elevation: 2,
+                  margin: const EdgeInsets.symmetric(vertical: 8),
+                  child: Padding(
                     padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: Colors.blue.shade50,
-                      borderRadius: BorderRadius.circular(8),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          "Passenger ${i + 1}",
+                          style: const TextStyle(
+                            fontWeight: FontWeight.bold,
+                            color: Colors.orange,
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                        TextField(
+                          controller: nameControllers[i],
+                          decoration: InputDecoration(
+                            labelText: "Name",
+                            filled: true,
+                            fillColor: Colors.grey.shade100,
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                        TextField(
+                          controller: contactControllers[i],
+                          decoration: InputDecoration(
+                            labelText: "Contact",
+                            filled: true,
+                            fillColor: Colors.grey.shade100,
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                          ),
+                          keyboardType: TextInputType.phone,
+                        ),
+                        const SizedBox(height: 10),
+                        TextField(
+                          controller: ageControllers[i],
+                          decoration: InputDecoration(
+                            labelText: "Age",
+                            filled: true,
+                            fillColor: Colors.grey.shade100,
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                          ),
+                          keyboardType: TextInputType.number,
+                        ),
+                        const SizedBox(height: 10),
+                        TextField(
+                          controller: genderControllers[i],
+                          decoration: InputDecoration(
+                            labelText: "Gender",
+                            filled: true,
+                            fillColor: Colors.grey.shade100,
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
-                    child: Text(
-                      policy['content']?.toString() ??
-                          'No modification policy content available',
-                      style: const TextStyle(fontSize: 12),
+                  ),
+                ),
+              ],
+
+              const SizedBox(height: 20),
+
+              // 🔹 Buttons row
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () => Navigator.pop(context),
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        side: BorderSide(color: Colors.orange.shade600),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                      child: Text(
+                        "Cancel",
+                        style: TextStyle(
+                          color: Colors.orange.shade600,
+                          fontSize: 16,
+                        ),
+                      ),
                     ),
-                  );
-                },
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: ElevatedButton(
+                      onPressed: () async {
+                        Navigator.pop(context);
+
+                        final updatedPassengers = List.generate(
+                          passengers.length,
+                          (i) {
+                            return {
+                              'name': nameControllers[i].text.trim(),
+                              'contact': contactControllers[i].text.trim(),
+                              'age':
+                                  int.tryParse(ageControllers[i].text.trim()) ??
+                                  0,
+                              'gender': genderControllers[i].text.trim(),
+                            };
+                          },
+                        );
+
+                        final success = await _bookingsViewModel.modifyBooking(
+                          bookingId: booking['id']?.toString() ?? '',
+                          updatedPassengers: updatedPassengers,
+                        );
+
+                        if (success && mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: const Text(
+                                'Booking modified successfully',
+                              ),
+                              backgroundColor: Colors.green,
+                              behavior: SnackBarBehavior.floating,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                            ),
+                          );
+                        } else if (mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text(
+                                _bookingsViewModel.error ??
+                                    'Failed to modify booking',
+                              ),
+                              backgroundColor: Colors.red,
+                              behavior: SnackBarBehavior.floating,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                            ),
+                          );
+                        }
+                      },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.orange.shade600,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                      child: const Text(
+                        "Save Changes",
+                        style: TextStyle(color: Colors.white, fontSize: 16),
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ],
           ),
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () async {
-              Navigator.pop(context);
-
-              final success = await _bookingsViewModel.modifyBooking(
-                bookingId: booking['id']?.toString() ?? '',
-                newPassengerName: nameController.text.trim(),
-                newPassengerContact: contactController.text.trim(),
-                newPickupPoint: pickupController.text.trim(),
-              );
-
-              if (success && mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: const Text('Booking modified successfully'),
-                    backgroundColor: Colors.green,
-                    behavior: SnackBarBehavior.floating,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                  ),
-                );
-              } else if (mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text(
-                      _bookingsViewModel.error ?? 'Failed to modify booking',
-                    ),
-                    backgroundColor: Colors.red,
-                    behavior: SnackBarBehavior.floating,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                  ),
-                );
-              }
-            },
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.blue),
-            child: const Text(
-              'Save Changes',
-              style: TextStyle(color: Colors.white),
-            ),
-          ),
-        ],
       ),
     );
   }

@@ -14,6 +14,10 @@ class EditProfileScreen extends StatefulWidget {
 class _EditProfileScreenState extends State<EditProfileScreen> {
   late TextEditingController _nameController;
   late TextEditingController _emailController;
+  late TextEditingController _genderController;
+  late TextEditingController _ageController;
+  late TextEditingController _contactController;
+
   File? _selectedDocument;
   final _formKey = GlobalKey<FormState>();
   bool _controllersInitialized = false;
@@ -23,6 +27,9 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     super.initState();
     _nameController = TextEditingController();
     _emailController = TextEditingController();
+    _genderController = TextEditingController();
+    _ageController = TextEditingController();
+    _contactController = TextEditingController();
 
     // Initialize controllers after the frame is built
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -72,6 +79,18 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
             viewModel.email != "Error Loading") {
           _emailController.text = viewModel.email;
         }
+        if (viewModel.gender != "Loading..." &&
+            viewModel.gender != "Error Loading") {
+          _genderController.text = viewModel.gender;
+        }
+        if (viewModel.age != "Loading..." && viewModel.age != "Error Loading") {
+          _ageController.text = viewModel.age;
+        }
+        if (viewModel.contactNumber != "Loading..." &&
+            viewModel.contactNumber != "Error Loading") {
+          _contactController.text = viewModel.contactNumber;
+        }
+
         _controllersInitialized = true;
       });
     }
@@ -206,11 +225,17 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
         ),
       ),
     );
+    if (_selectedDocument != null) {
+      await viewModel.saveDocumentPath(_selectedDocument!.path);
+    }
 
     try {
       await viewModel.updatePersonalInfo(
         _nameController.text.trim(),
         _emailController.text.trim(),
+        _genderController.text.trim(),
+        _ageController.text.trim(),
+        _contactController.text.trim(),
       );
 
       if (_selectedDocument != null) {
@@ -378,7 +403,30 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                           },
                         ),
 
-                        const SizedBox(height: 32),
+                        const SizedBox(height: 20),
+
+                        _buildTextField(
+                          controller: _genderController,
+                          labelText: "Gender",
+                          prefixIcon: Icons.male,
+                        ),
+                        const SizedBox(height: 20),
+
+                        _buildTextField(
+                          controller: _ageController,
+                          labelText: "Age",
+                          prefixIcon: Icons.cake,
+                          keyboardType: TextInputType.number,
+                        ),
+                        const SizedBox(height: 20),
+
+                        _buildTextField(
+                          controller: _contactController,
+                          labelText: "Contact Number",
+                          prefixIcon: Icons.phone,
+                          keyboardType: TextInputType.phone,
+                        ),
+                        const SizedBox(height: 20),
 
                         _buildSectionHeader("Identity Document"),
 
@@ -444,7 +492,8 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                                 ),
                               ),
 
-                              if (_selectedDocument != null) ...[
+                              if (_selectedDocument != null ||
+                                  viewModel.localDocumentPath != null) ...[
                                 const SizedBox(height: 16),
                                 Container(
                                   padding: const EdgeInsets.all(12),
@@ -457,15 +506,27 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                                   ),
                                   child: Row(
                                     children: [
-                                      Icon(
-                                        Icons.check_circle,
-                                        color: Colors.green.shade600,
-                                        size: 20,
+                                      // 🖼 Image Preview
+                                      ClipRRect(
+                                        borderRadius: BorderRadius.circular(6),
+                                        child: Image.file(
+                                          _selectedDocument != null
+                                              ? _selectedDocument!
+                                              : File(
+                                                  viewModel.localDocumentPath!,
+                                                ),
+                                          width: 50,
+                                          height: 50,
+                                          fit: BoxFit.cover,
+                                        ),
                                       ),
-                                      const SizedBox(width: 8),
+
+                                      const SizedBox(width: 12),
+
+                                      // 📄 File Name
                                       Expanded(
                                         child: Text(
-                                          "Selected: ${_selectedDocument!.path.split('/').last}",
+                                          "Selected: ${_selectedDocument != null ? _selectedDocument!.path.split('/').last : viewModel.localDocumentPath!.split('/').last}",
                                           style: TextStyle(
                                             fontSize: 14,
                                             color: Colors.green.shade700,
@@ -474,6 +535,8 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                                           overflow: TextOverflow.ellipsis,
                                         ),
                                       ),
+
+                                      // ❌ Remove Button
                                       IconButton(
                                         icon: Icon(
                                           Icons.close,
@@ -483,6 +546,8 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                                         onPressed: () {
                                           setState(() {
                                             _selectedDocument = null;
+                                            viewModel.localDocumentPath = null;
+                                            viewModel.notifyListeners();
                                           });
                                         },
                                       ),

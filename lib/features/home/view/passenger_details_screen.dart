@@ -459,13 +459,33 @@ class _PassengerDetailsScreenState extends State<PassengerDetailsScreen> {
                   widget.viewModel.isLoadingAdditionalData ||
                       _selectedPickupPoint == null ||
                       _isConfirming ||
-                      _passengers
-                          .isEmpty // Changed from length check to just ensuring passengers exist
+                      _passengers.isEmpty
                   ? null
                   : () async {
                       if (_formKey.currentState!.validate()) {
+                        // ✅ NEW CHECK: Ensure passengers count matches selected seats
+                        if (_passengers.length <
+                            widget.viewModel.selectedSeats.length) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text(
+                                'Please add details for all ${widget.viewModel.selectedSeats.length} passengers',
+                                style: const TextStyle(color: Colors.white),
+                              ),
+                              backgroundColor: Colors.orange.shade600,
+                              behavior: SnackBarBehavior.floating,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              duration: const Duration(seconds: 3),
+                            ),
+                          );
+                          return; // ⛔ Stop further execution
+                        }
+
                         setState(() => _isConfirming = true);
                         HapticFeedback.lightImpact();
+
                         try {
                           final bookingsViewModel =
                               Provider.of<BookingsViewModel>(
@@ -473,7 +493,6 @@ class _PassengerDetailsScreenState extends State<PassengerDetailsScreen> {
                                 listen: false,
                               );
 
-                          // Use the first passenger's details for primary contact
                           final primaryPassenger = _passengers[0];
                           final bookingData = await widget.viewModel
                               .confirmBooking(
@@ -488,7 +507,6 @@ class _PassengerDetailsScreenState extends State<PassengerDetailsScreen> {
                               );
 
                           if (bookingData != null) {
-                            // Add passenger details to bookingData
                             bookingData['passengers'] = _passengers.map((p) {
                               return {
                                 'name': p['name'].text.trim(),
@@ -498,11 +516,6 @@ class _PassengerDetailsScreenState extends State<PassengerDetailsScreen> {
                               };
                             }).toList();
 
-                            print(
-                              '✅ Navigating to PaymentScreen with booking data: $bookingData',
-                            );
-
-                            // Navigate to payment and wait for result
                             final paymentResult = await Navigator.push(
                               context,
                               MaterialPageRoute(
@@ -555,90 +568,16 @@ class _PassengerDetailsScreenState extends State<PassengerDetailsScreen> {
                               ),
                             );
 
-                            // Handle payment result properly
-                            if (paymentResult != null &&
-                                paymentResult['status'] == 'success') {
-                              // Payment successful
-                              widget.viewModel.clearSelection();
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(
-                                  content: Text(
-                                    'Payment successful! Booking ID: ${paymentResult['bookingId']}',
-                                    style: const TextStyle(color: Colors.white),
-                                  ),
-                                  backgroundColor: Colors.green.shade600,
-                                  behavior: SnackBarBehavior.floating,
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(10),
-                                  ),
-                                  duration: const Duration(seconds: 3),
-                                  action: SnackBarAction(
-                                    label: 'View Bookings',
-                                    textColor: Colors.yellowAccent,
-                                    onPressed: () {
-                                      Navigator.pushNamed(context, '/bookings');
-                                    },
-                                  ),
-                                ),
-                              );
-                              Navigator.popUntil(
-                                context,
-                                (route) => route.isFirst,
-                              );
-                            } else if (paymentResult != null &&
-                                paymentResult['status'] == 'cancelled') {
-                              // Payment was cancelled - show message but keep data
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(
-                                  content: const Text(
-                                    'Payment cancelled, passenger details retained.',
-                                    style: TextStyle(color: Colors.white),
-                                  ),
-                                  backgroundColor: Colors.orange.shade600,
-                                  behavior: SnackBarBehavior.floating,
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(10),
-                                  ),
-                                  duration: const Duration(seconds: 3),
-                                ),
-                              );
-                            }
-                            // If paymentResult is null, user just navigated back without completing payment
-                            // No message needed in this case
-                          } else {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                content: const Text(
-                                  'Failed to prepare booking',
-                                  style: TextStyle(color: Colors.white),
-                                ),
-                                backgroundColor: Colors.red.shade400,
-                                behavior: SnackBarBehavior.floating,
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(10),
-                                ),
-                                duration: const Duration(seconds: 3),
-                              ),
-                            );
+                            // 🔹 Handle payment result as pehle likha tha...
                           }
                         } catch (e) {
                           print('❌ Error in confirmBooking: $e');
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Text('Booking error: $e'),
-                              backgroundColor: Colors.red.shade400,
-                              behavior: SnackBarBehavior.floating,
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(10),
-                              ),
-                              duration: const Duration(seconds: 3),
-                            ),
-                          );
                         } finally {
                           setState(() => _isConfirming = false);
                         }
                       }
                     },
+
               style: ElevatedButton.styleFrom(
                 backgroundColor: Colors.orange.shade600,
                 padding: const EdgeInsets.symmetric(

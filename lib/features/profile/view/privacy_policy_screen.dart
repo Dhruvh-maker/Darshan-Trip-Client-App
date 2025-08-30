@@ -8,9 +8,19 @@ class PrivacyPolicyScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text("Privacy Policy"),
+        title: const Text(
+          "Privacy Policy",
+          style: TextStyle(color: Colors.white), // 👈 Title white
+        ),
         backgroundColor: Colors.orange.shade600,
-        foregroundColor: Colors.white,
+        foregroundColor: Colors.white, // 👈 ensures default icons are white
+        iconTheme: const IconThemeData(
+          color: Colors.white,
+        ), // 👈 back icon white
+        actionsIconTheme: const IconThemeData(
+          color: Colors.white,
+        ), // 👈 actions white
+        elevation: 0,
       ),
       body: StreamBuilder<QuerySnapshot>(
         stream: FirebaseFirestore.instance

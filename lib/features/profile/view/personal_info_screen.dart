@@ -12,6 +12,9 @@ class PersonalInfoScreen extends StatefulWidget {
 class _PersonalInfoScreenState extends State<PersonalInfoScreen> {
   late TextEditingController _nameController;
   late TextEditingController _emailController;
+  late TextEditingController _genderController;
+  late TextEditingController _ageController;
+  late TextEditingController _contactController;
 
   @override
   void initState() {
@@ -22,6 +25,9 @@ class _PersonalInfoScreenState extends State<PersonalInfoScreen> {
     );
     _nameController = TextEditingController(text: viewModel.userName);
     _emailController = TextEditingController(text: viewModel.email);
+    _genderController = TextEditingController(text: viewModel.gender);
+    _ageController = TextEditingController(text: viewModel.age);
+    _contactController = TextEditingController(text: viewModel.contactNumber);
   }
 
   @override
@@ -51,14 +57,35 @@ class _PersonalInfoScreenState extends State<PersonalInfoScreen> {
               decoration: const InputDecoration(labelText: "Email"),
             ),
             const SizedBox(height: 32),
+            TextField(
+              controller: _genderController,
+              decoration: const InputDecoration(labelText: "Gender"),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: _ageController,
+              decoration: const InputDecoration(labelText: "Age"),
+              keyboardType: TextInputType.number,
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: _contactController,
+              decoration: const InputDecoration(labelText: "Contact Number"),
+              keyboardType: TextInputType.phone,
+            ),
+
             ElevatedButton(
               onPressed: () {
                 viewModel.updatePersonalInfo(
                   _nameController.text,
                   _emailController.text,
+                  _genderController.text,
+                  _ageController.text,
+                  _contactController.text,
                 );
-                Navigator.pop(context); // Go back to Profile Screen
+                Navigator.pop(context);
               },
+
               child: const Text("Save"),
             ),
           ],

@@ -76,8 +76,8 @@ class _SignupScreenState extends State<SignupScreen> {
                   borderRadius: BorderRadius.circular(50),
                   child: Image.asset(
                     "assets/logo.png",
-                    width: 100,
-                    height: 100,
+                    width: 150,
+                    height: 150,
                     fit: BoxFit.cover,
                     errorBuilder: (context, error, stackTrace) {
                       return Container(

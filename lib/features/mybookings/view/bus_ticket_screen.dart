@@ -62,20 +62,23 @@ class BusTicketScreen extends StatelessWidget {
         ),
         backgroundColor: const Color(0xFFF5A623),
         elevation: 0,
+        iconTheme: const IconThemeData(
+          color: Colors.white,
+        ), // 👈 Back Icon White
         actions: [
-          TextButton(
+          IconButton(
+            icon: const Icon(Icons.share, color: Colors.white),
             onPressed: () => _shareTicket(context, booking, busData),
-            child: const Text('Share', style: TextStyle(color: Colors.white)),
+            tooltip: 'Share Ticket',
           ),
-          TextButton(
+          IconButton(
+            icon: const Icon(Icons.download, color: Colors.white),
             onPressed: () => _downloadTicketAsPDF(context, booking, busData),
-            child: const Text(
-              'Download',
-              style: TextStyle(color: Colors.white),
-            ),
+            tooltip: 'Download Ticket',
           ),
         ],
       ),
+
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(16),
         child: Column(

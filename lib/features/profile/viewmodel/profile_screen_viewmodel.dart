@@ -6,7 +6,9 @@ class ProfileScreenViewModel extends ChangeNotifier {
   // Profile Data
   String userName = "Loading...";
   String email = "Loading...";
-  final String memberSince = "Member since May 2024";
+  String gender = "Loading...";
+  String age = "Loading...";
+  String contactNumber = "Loading...";
   String profileImage =
       "https://ui-avatars.com/api/?name=User&size=72&background=F5A623&color=fff";
 
@@ -16,6 +18,12 @@ class ProfileScreenViewModel extends ChangeNotifier {
   // 🔥 FIX: Make sure isLoading is properly initialized and accessible
   bool _isLoading = true;
   bool get isLoading => _isLoading;
+  String? localDocumentPath;
+
+  Future<void> saveDocumentPath(String path) async {
+    localDocumentPath = path;
+    notifyListeners();
+  }
 
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
@@ -44,6 +52,9 @@ class ProfileScreenViewModel extends ChangeNotifier {
           var userData = userQuery.docs.first.data() as Map<String, dynamic>;
           userName = userData['name'] ?? "Unknown User";
           email = userData['email'] ?? "No Email";
+          gender = userData['gender'] ?? "Not set";
+          age = userData['age']?.toString() ?? "Not set";
+          contactNumber = userData['contactNumber'] ?? "Not set";
 
           // Update profile image URL with actual name
           profileImage =
@@ -67,6 +78,9 @@ class ProfileScreenViewModel extends ChangeNotifier {
         print("Fallback error: $fallbackError");
         userName = "Error Loading";
         email = "Error Loading";
+        gender = "Error Loading";
+        age = "Error Loading";
+        contactNumber = "Error Loading";
       }
     } finally {
       _isLoading = false;
@@ -87,6 +101,9 @@ class ProfileScreenViewModel extends ChangeNotifier {
     } else {
       userName = "Unknown User";
       email = "No Email";
+      gender = prefs.getString('userGender') ?? "Not set";
+      age = prefs.getString('userAge') ?? "Not set";
+      contactNumber = prefs.getString('userPhone') ?? "Not set";
     }
   }
 
@@ -143,7 +160,13 @@ class ProfileScreenViewModel extends ChangeNotifier {
   }
 
   // Update Personal Info
-  Future<void> updatePersonalInfo(String newName, String newEmail) async {
+  Future<void> updatePersonalInfo(
+    String newName,
+    String newEmail,
+    String newGender,
+    String newAge,
+    String newContactNumber,
+  ) async {
     _isLoading = true;
     notifyListeners();
 
@@ -158,23 +181,31 @@ class ProfileScreenViewModel extends ChangeNotifier {
       }
 
       SharedPreferences prefs = await SharedPreferences.getInstance();
-      String? phone = prefs.getString('userPhone');
+
       String? userId = prefs.getString('userId');
 
-      if (phone != null && userId != null) {
+      if (userId != null) {
         // Update in Firestore
         await _firestore.collection('users').doc(userId).update({
           'name': newName.trim(),
           'email': newEmail.trim(),
+          'gender': newGender.trim(),
+          'age': newAge.trim(),
+          'contactNumber': newContactNumber.trim(),
         });
 
-        // Update SharedPreferences
         await prefs.setString('userName', newName.trim());
         await prefs.setString('userEmail', newEmail.trim());
+        await prefs.setString('userGender', newGender.trim());
+        await prefs.setString('userAge', newAge.trim());
+        await prefs.setString('userPhone', newContactNumber.trim());
 
         // Update local state
         userName = newName.trim();
         email = newEmail.trim();
+        gender = newGender.trim();
+        age = newAge.trim();
+        contactNumber = newContactNumber.trim();
         profileImage =
             "https://ui-avatars.com/api/?name=${Uri.encodeComponent(userName)}&size=72&background=F5A623&color=fff";
 
@@ -202,12 +233,21 @@ class ProfileScreenViewModel extends ChangeNotifier {
 
   Future<void> updatePersonalInfoWithCallback(
     String newName,
-    String newEmail, {
+    String newEmail,
+    String newGender,
+    String newAge,
+    String newContactNumber, {
     Function()? onSuccess,
     Function(String error)? onError,
   }) async {
     try {
-      await updatePersonalInfo(newName, newEmail);
+      await updatePersonalInfo(
+        newName,
+        newEmail,
+        newGender,
+        newAge,
+        newContactNumber,
+      );
       onSuccess?.call();
     } catch (e) {
       onError?.call(e.toString());

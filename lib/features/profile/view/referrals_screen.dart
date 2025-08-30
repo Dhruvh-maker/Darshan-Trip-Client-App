@@ -56,11 +56,18 @@ class _ReferralsScreenState extends State<ReferralsScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text("Refer & Earn"),
+        title: const Text(
+          "Refer & Earn",
+          style: TextStyle(color: Colors.white),
+        ),
         backgroundColor: Colors.orange.shade600,
-        foregroundColor: Colors.white,
         elevation: 0,
+        automaticallyImplyLeading: true, // back button dikhane ke liye
+        iconTheme: const IconThemeData(
+          color: Colors.white,
+        ), // 👈 ye line add karo
       ),
+
       backgroundColor: Colors.grey[100],
       body: Padding(
         padding: const EdgeInsets.all(20.0),

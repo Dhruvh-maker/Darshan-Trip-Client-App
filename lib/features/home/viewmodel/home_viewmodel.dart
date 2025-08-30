@@ -94,6 +94,9 @@ class HomeViewModel extends ChangeNotifier {
     notifyListeners();
 
     try {
+      Set<String> combinedDestinations = {};
+
+      // Fetch from destinations collection
       final destinationsSnapshot = await _firestore
           .collection('destinations')
           .where('status', isEqualTo: 'active')
@@ -101,19 +104,36 @@ class HomeViewModel extends ChangeNotifier {
           .timeout(const Duration(seconds: 10));
 
       if (destinationsSnapshot.docs.isNotEmpty) {
-        _destinations =
-            destinationsSnapshot.docs
-                .map((doc) => doc['name'] as String)
-                .where((name) => name.isNotEmpty)
-                .toList()
-              ..sort();
-        print("✅ Firestore Destinations Fetched: $_destinations");
-      } else {
-        print(
-          "⚠️ No active destinations found in Firestore 'destinations' collection",
-        );
-        _destinations = [];
+        final destNames = destinationsSnapshot.docs
+            .map((doc) => doc['name'] as String)
+            .where((name) => name.isNotEmpty);
+        combinedDestinations.addAll(destNames);
+        print("✅ Names from 'destinations' collection: ${destNames.length}");
       }
+
+      // Fetch from pickupPoints collection
+      final pickupPointsSnapshot = await _firestore
+          .collection('pickupPoints')
+          .where('status', isEqualTo: 'active')
+          .get()
+          .timeout(const Duration(seconds: 10));
+
+      if (pickupPointsSnapshot.docs.isNotEmpty) {
+        final pickupNames = pickupPointsSnapshot.docs
+            .map((doc) => doc['name'] as String)
+            .where((name) => name.isNotEmpty);
+        combinedDestinations.addAll(pickupNames);
+        print("✅ Names from 'pickupPoints' collection: ${pickupNames.length}");
+      }
+
+      // ✅ अब startPoints नहीं जोड़ेंगे
+      // ✅ Haridwar भी अलग से add कर सकते हैं (optional)
+      combinedDestinations.add("Haridwar");
+
+      _destinations = combinedDestinations.toList()..sort();
+      print(
+        "✅ Final Destinations (with pickupPoints): ${_destinations.length}",
+      );
     } catch (e) {
       print('Error fetching destinations from Firestore: $e');
       _destinations = [];
@@ -142,11 +162,21 @@ class HomeViewModel extends ChangeNotifier {
 
   // City selection
   void setSourceCity(String city) {
+    if (city == _destinationCity) {
+      // अगर source और destination same हो गए
+      debugPrint("⚠️ Source and Destination can't be same");
+      return;
+    }
     _sourceCity = city;
     notifyListeners();
   }
 
   void setDestinationCity(String city) {
+    if (city == _sourceCity) {
+      // अगर destination और source same हो गए
+      debugPrint("⚠️ Source and Destination can't be same");
+      return;
+    }
     _destinationCity = city;
     notifyListeners();
   }
@@ -233,6 +263,26 @@ class HomeViewModel extends ChangeNotifier {
         'label': 'Tomorrow',
         'date': now.add(const Duration(days: 1)),
         'shortLabel': _formatDate(now.add(const Duration(days: 1))),
+      },
+      {
+        'label': 'Day After',
+        'date': now.add(const Duration(days: 2)),
+        'shortLabel': _formatDate(now.add(const Duration(days: 2))),
+      },
+      {
+        'label': 'In 3 Days',
+        'date': now.add(const Duration(days: 3)),
+        'shortLabel': _formatDate(now.add(const Duration(days: 3))),
+      },
+      {
+        'label': 'In 4 Days',
+        'date': now.add(const Duration(days: 4)),
+        'shortLabel': _formatDate(now.add(const Duration(days: 4))),
+      },
+      {
+        'label': 'In 5 Days',
+        'date': now.add(const Duration(days: 5)),
+        'shortLabel': _formatDate(now.add(const Duration(days: 5))),
       },
     ];
   }

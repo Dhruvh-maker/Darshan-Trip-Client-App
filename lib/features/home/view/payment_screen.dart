@@ -49,6 +49,7 @@ class _PaymentScreenState extends State<PaymentScreen>
   bool _isApplyingPromo = false;
   double _discountAmount = 0.0;
   double _finalAmount = 0.0;
+  double _walletUsed = 0.0;
 
   final List<PaymentOption> paymentOptions = [
     PaymentOption(
@@ -128,6 +129,20 @@ class _PaymentScreenState extends State<PaymentScreen>
     super.dispose();
   }
 
+  void _recalculateWithWallet(WalletViewModel walletVM) {
+    final payable = _finalAmount; // ✅ Use already discounted amount
+    final balance = walletVM.walletBalance;
+
+    if (balance >= payable) {
+      _walletUsed = payable;
+      _finalAmount = 0;
+    } else {
+      _walletUsed = balance;
+      _finalAmount = payable - balance;
+    }
+    setState(() {});
+  }
+
   String _getEmailForPayment() {
     return '${widget.passengerContact}@temp.com';
   }
@@ -194,7 +209,7 @@ class _PaymentScreenState extends State<PaymentScreen>
     });
 
     try {
-      final promoCode = _promoCodeController.text.trim().toUpperCase();
+      final promoCode = _promoCodeController.text.trim();
 
       // Fetch promo code from Firestore
       final promoSnapshot = await FirebaseFirestore.instance
@@ -1236,9 +1251,17 @@ class _PaymentScreenState extends State<PaymentScreen>
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       child: InkWell(
-        onTap: (isWalletOption && !isWalletSufficient) || _isNavigating
+        onTap: _isNavigating
             ? null
-            : () => setState(() => selectedPaymentMethod = option.id),
+            : () {
+                setState(() {
+                  selectedPaymentMethod = option.id;
+                  if (isWalletOption) {
+                    _recalculateWithWallet(walletVM); // ✅ partial calculate
+                  }
+                });
+              },
+
         borderRadius: BorderRadius.circular(12),
         child: Container(
           padding: const EdgeInsets.all(16),
@@ -1248,11 +1271,7 @@ class _PaymentScreenState extends State<PaymentScreen>
               color: isSelected ? Colors.orange.shade600 : Colors.grey.shade300,
               width: isSelected ? 2 : 1,
             ),
-            color: isSelected
-                ? Colors.orange.shade50
-                : isWalletOption && !isWalletSufficient
-                ? Colors.grey.shade100
-                : Colors.white,
+            color: isSelected ? Colors.orange.shade50 : Colors.white,
           ),
           child: Row(
             children: [
@@ -1412,7 +1431,9 @@ class _PaymentScreenState extends State<PaymentScreen>
                     style: TextStyle(fontSize: 14, color: Colors.grey.shade600),
                   ),
                   Text(
-                    '₹${_finalAmount.toStringAsFixed(2)}',
+                    _walletUsed > 0
+                        ? "₹${_finalAmount.toStringAsFixed(2)} (Wallet used ₹${_walletUsed.toStringAsFixed(2)})"
+                        : "₹${_finalAmount.toStringAsFixed(2)}",
                     style: TextStyle(
                       fontSize: 20,
                       fontWeight: FontWeight.bold,
@@ -1493,49 +1514,16 @@ class _PaymentScreenState extends State<PaymentScreen>
     });
 
     try {
-      final seats = widget.bookingData['selectedSeats'] ?? widget.selectedSeats;
-
-      if (_finalAmount <= 0) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Invalid payment amount'),
-              backgroundColor: Colors.red,
-            ),
-          );
-        }
-        return;
-      }
-
-      bool hasNoSeats = false;
-      if (seats is List) {
-        hasNoSeats = seats.isEmpty;
-      } else if (seats == null) {
-        hasNoSeats = true;
-      }
-
-      if (hasNoSeats) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('No seats selected'),
-              backgroundColor: Colors.red,
-            ),
-          );
-        }
-        return;
-      }
-
       final passengerName =
           widget.bookingData['passengerName'] ?? widget.passengerName;
       final passengerContact =
           widget.bookingData['passengerContact'] ?? widget.passengerContact;
 
-      // Update booking data with final amount and promo details
+      // ✅ Update booking data with final amount + promo info
       Map<String, dynamic> updatedBookingData = Map.from(widget.bookingData);
-      updatedBookingData['finalAmount'] = _finalAmount;
       updatedBookingData['originalAmount'] =
           widget.bookingData['totalAmount']?.toDouble() ?? widget.totalAmount;
+      updatedBookingData['finalAmount'] = _finalAmount;
 
       if (_appliedPromoCode != null) {
         updatedBookingData['promoCode'] = _appliedPromoCode!['code'];
@@ -1545,54 +1533,66 @@ class _PaymentScreenState extends State<PaymentScreen>
 
       widget.viewModel.setTotalAmount(_finalAmount);
 
+      // ✅ Wallet flow
       if (selectedPaymentMethod == 'wallet') {
-        final success = await walletVM.processWalletPayment(
-          amount: _finalAmount,
-          bookingId: widget.busId,
-          description:
-              'Bus ticket payment for ${widget.busDetails?['from']} to ${widget.busDetails?['to']}',
-        );
+        final balance = walletVM.walletBalance;
 
-        if (success) {
-          final bookingsViewModel = Provider.of<BookingsViewModel>(
-            context,
-            listen: false,
-          );
-          final bookingId = await widget.viewModel.saveBooking(
-            context,
-            bookingsViewModel,
-            updatedBookingData,
-            paymentMethod: 'Wallet',
-          );
-
-          if (bookingId != null && mounted) {
-            // IMPORTANT: Reset loading states BEFORE showing dialog
-            setState(() {
-              isProcessingPayment = false;
-              _isNavigating = false;
-            });
-
-            // Show success message
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text(
-                  "Payment and booking successful! Booking ID: $bookingId",
-                ),
-                backgroundColor: Colors.green,
-              ),
+        // ---- FULL WALLET PAYMENT ----
+        if (_finalAmount == 0 && _walletUsed > 0) {
+          final success = await walletVM.deductFromWallet(_walletUsed);
+          if (success) {
+            final bookingsVM = Provider.of<BookingsViewModel>(
+              context,
+              listen: false,
+            );
+            final bookingId = await widget.viewModel.saveBooking(
+              context,
+              bookingsVM,
+              {...updatedBookingData, "walletUsed": _walletUsed},
+              paymentMethod: 'Wallet',
             );
 
-            // Show success dialog
-            _showPaymentSuccessDialog(context, bookingId);
-            return; // IMPORTANT: Return here to prevent further execution
+            if (bookingId != null && mounted) {
+              setState(() {
+                isProcessingPayment = false;
+                _isNavigating = false;
+              });
+              _showPaymentSuccessDialog(context, bookingId);
+              return;
+            } else {
+              throw Exception("Booking failed after wallet payment");
+            }
           } else {
-            throw Exception("Booking failed after wallet payment");
+            throw Exception("Wallet deduction failed");
           }
-        } else {
-          throw Exception("Insufficient wallet balance or payment failed");
         }
-      } else {
-        // For other payment methods
+        // ---- PARTIAL WALLET + OTHER METHOD ----
+        else {
+          final success = await walletVM.deductFromWallet(_walletUsed);
+          if (!success) throw Exception("Wallet deduction failed");
+
+          await widget.viewModel.initiatePayment(
+            context,
+            passengerName,
+            passengerContact,
+            _getEmailForPayment(),
+            {
+              ...updatedBookingData,
+              "walletUsed": _walletUsed,
+              "finalAmount": _finalAmount,
+            },
+          );
+
+          if (mounted) {
+            setState(() {
+              isProcessingPayment = false;
+              _isNavigating = true;
+            });
+          }
+        }
+      }
+      // ✅ Normal payment (UPI / Card / NetBanking)
+      else {
         await widget.viewModel.initiatePayment(
           context,
           passengerName,
@@ -1619,7 +1619,6 @@ class _PaymentScreenState extends State<PaymentScreen>
         );
       }
     } finally {
-      // Only reset loading state if we haven't already done so
       if (mounted && isProcessingPayment) {
         setState(() {
           isProcessingPayment = false;
@@ -1751,38 +1750,59 @@ class _PaymentScreenState extends State<PaymentScreen>
     }
   }
 
-  void _showHelpDialog(BuildContext context) {
+  void _showHelpDialog(BuildContext context) async {
     if (_isNavigating) return;
 
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text('Need Help?'),
-        content: const Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('• All payments are 100% secure and encrypted'),
-            SizedBox(height: 8),
-            Text('• You will receive SMS confirmation'),
-            SizedBox(height: 8),
-            Text('• Refund will be processed within 3-5 business days'),
-            SizedBox(height: 8),
-            Text('• For support, call: 1800-123-456'),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text(
-              'Got it',
-              style: TextStyle(color: Colors.orange.shade600),
+    try {
+      final snapshot = await FirebaseFirestore.instance
+          .collection('policies')
+          .where('title', isEqualTo: 'help')
+          .limit(1)
+          .get();
+
+      if (snapshot.docs.isNotEmpty) {
+        final helpData = snapshot.docs.first.data();
+        final helpContent = helpData['content'] ?? 'No help info available';
+
+        showDialog(
+          context: context,
+          builder: (context) => AlertDialog(
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
             ),
+            title: const Text('Need Help?'),
+            content: Text(
+              helpContent,
+              style: const TextStyle(fontSize: 14, color: Colors.black87),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: Text(
+                  'Got it',
+                  style: TextStyle(color: Colors.orange.shade600),
+                ),
+              ),
+            ],
           ),
-        ],
-      ),
-    );
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Help information not available'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } catch (e) {
+      print("❌ Error fetching help info: $e");
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Error loading help information'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
   }
 }
 

@@ -8,9 +8,19 @@ class TermsConditionsScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text("Terms and Conditions"),
+        title: const Text(
+          "Terms and Conditions",
+          style: TextStyle(color: Colors.white), // 👈 Title White
+        ),
         backgroundColor: Colors.orange.shade600,
-        foregroundColor: Colors.white,
+        foregroundColor: Colors.white, // 👈 Ensures back icon is white
+        iconTheme: const IconThemeData(
+          color: Colors.white,
+        ), // 👈 Back button white
+        actionsIconTheme: const IconThemeData(
+          color: Colors.white,
+        ), // 👈 Any actions white
+        elevation: 0,
       ),
       body: StreamBuilder<QuerySnapshot>(
         stream: FirebaseFirestore.instance

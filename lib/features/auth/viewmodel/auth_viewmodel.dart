@@ -13,6 +13,7 @@ class AuthViewModel extends ChangeNotifier {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final FirebaseAuth _auth = FirebaseAuth.instance;
   String? _verificationId;
+  String loginMethod = "password";
 
   // Add user state management
   String? _currentUserId;
@@ -61,6 +62,28 @@ class AuthViewModel extends ChangeNotifier {
         duration: const Duration(seconds: 3),
       ),
     );
+  }
+
+  Future<void> fetchLoginConfig() async {
+    try {
+      final doc = await _firestore
+          .collection('settings')
+          .doc('landingPage')
+          .get();
+
+      if (doc.exists && doc.data()!.containsKey('loginmethod')) {
+        loginMethod = doc['loginmethod'] ?? "password"; // fallback password
+      } else {
+        loginMethod = "password"; // fallback
+      }
+
+      notifyListeners();
+      print("✅ Login method from backend: $loginMethod");
+    } catch (e) {
+      loginMethod = "password"; // fallback on error
+      notifyListeners();
+      print("❌ Error fetching login config, using default: password");
+    }
   }
 
   // Initialize user session from SharedPreferences

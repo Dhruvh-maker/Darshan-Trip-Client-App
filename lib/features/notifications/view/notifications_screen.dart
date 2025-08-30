@@ -17,7 +17,11 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     super.initState();
     // Initialize notifications when screen loads
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      context.read<NotificationsViewModel>().initialize();
+      final viewModel = context.read<NotificationsViewModel>();
+      viewModel.initialize().then((_) {
+        // ✅ जब भी screen load हो, सारे unread auto-read हो जाएं
+        viewModel.markAllAsRead();
+      });
     });
   }
 

@@ -561,7 +561,7 @@ class HomeTab extends StatelessWidget {
                         ),
                         const SizedBox(width: 8),
                         Text(
-                          "Search Buses",
+                          "Search Trips",
                           style: TextStyle(
                             color: viewModel.canSearch
                                 ? Colors.white
@@ -699,7 +699,7 @@ class HomeTab extends StatelessWidget {
             color: Colors.black87,
           ),
         ),
-        const SizedBox(height: 12),
+
         GridView.builder(
           shrinkWrap: true,
           physics: const NeverScrollableScrollPhysics(),
@@ -947,9 +947,27 @@ class HomeTab extends StatelessWidget {
 
     if (selectedCity != null) {
       if (isSource) {
-        viewModel.setSourceCity(selectedCity);
+        if (selectedCity == viewModel.destinationCity) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text("Source and Destination can't be same"),
+              backgroundColor: Colors.red,
+            ),
+          );
+        } else {
+          viewModel.setSourceCity(selectedCity);
+        }
       } else {
-        viewModel.setDestinationCity(selectedCity);
+        if (selectedCity == viewModel.sourceCity) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text("Source and Destination can't be same"),
+              backgroundColor: Colors.red,
+            ),
+          );
+        } else {
+          viewModel.setDestinationCity(selectedCity);
+        }
       }
     }
   }

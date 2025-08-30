@@ -538,6 +538,7 @@ For queries, contact: support@busoperator.com
     String? newPassengerName,
     String? newPassengerContact,
     String? newPickupPoint,
+    List<Map<String, dynamic>>? updatedPassengers, // 👈 add this
   }) async {
     try {
       _isLoading = true;
@@ -555,7 +556,6 @@ For queries, contact: support@busoperator.com
           .collection('bookings')
           .doc(bookingId)
           .get();
-
       if (!bookingDoc.exists) {
         throw 'Booking not found';
       }
@@ -565,94 +565,38 @@ For queries, contact: support@busoperator.com
         throw 'Unauthorized to modify this booking';
       }
 
-      // Check modification limits
-      final modificationCount = bookingData['modificationCount'] ?? 0;
-      if (modificationCount >= 1 && newTravelDate != null) {
-        throw 'Date modification allowed only once per booking';
-      }
-
-      // Check if modification is allowed based on time
-      final currentBookingDateStr = bookingData['bookingDate']?.toString();
-      if (currentBookingDateStr != null) {
-        final currentBookingDate = DateFormat(
-          'yyyy-MM-dd',
-        ).parse(currentBookingDateStr);
-        final now = DateTime.now();
-        final timeDifference = currentBookingDate.difference(now);
-
-        if (timeDifference.inHours < 2) {
-          throw 'Modification not allowed less than 2 hours before departure';
-        }
-      }
-
-      // Prepare update data
       Map<String, dynamic> updateData = {
         'lastModifiedAt': FieldValue.serverTimestamp(),
       };
 
-      // Handle date change
-      if (newTravelDate != null) {
-        final newDateStr = DateFormat('yyyy-MM-dd').format(newTravelDate);
+      // ✅ Passenger array overwrite
+      if (updatedPassengers != null && updatedPassengers.isNotEmpty) {
+        updateData['passengers'] = updatedPassengers;
 
-        // Check seat availability for new date
-        if (newSeats != null) {
-          final seatNumbers = newSeats
-              .map((seat) => int.tryParse(seat) ?? 0)
-              .toList();
-          final availability = await _checkSeatAvailability(
-            bookingData['busId']?.toString() ?? '',
-            newDateStr,
-            seatNumbers,
-            excludeBookingId: bookingId,
-          );
-
-          if (!availability) {
-            throw 'Selected seats not available for the new date';
-          }
-
-          updateData['seats'] = seatNumbers;
-        }
-
-        updateData['bookingDate'] = newDateStr;
-        updateData['modificationCount'] = (modificationCount) + 1;
+        // primary passenger को भी sync करो
+        updateData['passengerName'] = updatedPassengers.first['name'];
+        updateData['passengerContact'] = updatedPassengers.first['contact'];
       }
 
-      // Handle seat change only (same date)
-      if (newSeats != null && newTravelDate == null) {
-        final seatNumbers = newSeats
-            .map((seat) => int.tryParse(seat) ?? 0)
-            .toList();
-        final availability = await _checkSeatAvailability(
-          bookingData['busId']?.toString() ?? '',
-          currentBookingDateStr ?? '',
-          seatNumbers,
-          excludeBookingId: bookingId,
-        );
-
-        if (!availability) {
-          throw 'Selected seats not available';
-        }
-
-        updateData['seats'] = seatNumbers;
-      }
-
-      // Handle passenger details change
-      if (newPassengerName != null && newPassengerName.isNotEmpty) {
-        updateData['passengerName'] = newPassengerName;
-      }
-
-      if (newPassengerContact != null && newPassengerContact.isNotEmpty) {
-        if (!RegExp(r'^\d{10}$').hasMatch(newPassengerContact)) {
-          throw 'Invalid passenger contact number';
-        }
-        updateData['passengerContact'] = newPassengerContact;
-      }
-
+      // Handle pickup point
       if (newPickupPoint != null && newPickupPoint.isNotEmpty) {
         updateData['pickupPoint'] = newPickupPoint;
       }
 
-      // Update booking in Firestore
+      // Handle date
+      if (newTravelDate != null) {
+        updateData['bookingDate'] = DateFormat(
+          'yyyy-MM-dd',
+        ).format(newTravelDate);
+      }
+
+      // Handle seats
+      if (newSeats != null) {
+        updateData['seats'] = newSeats
+            .map((s) => int.tryParse(s) ?? 0)
+            .toList();
+      }
+
       await _firestore.collection('bookings').doc(bookingId).update(updateData);
 
       // Update local list
@@ -663,7 +607,6 @@ For queries, contact: support@busoperator.com
         });
       }
 
-      print('✅ Booking modified: $bookingId');
       return true;
     } catch (e) {
       _error = 'Failed to modify booking: $e';

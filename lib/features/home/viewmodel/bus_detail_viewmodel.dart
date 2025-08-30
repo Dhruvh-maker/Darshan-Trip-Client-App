@@ -34,6 +34,8 @@ class BusDetailViewModel extends ChangeNotifier {
   bool _isLoadingAdditionalData = false;
   double _totalAmount = 0.0;
   Map<String, double> _seatFares = {};
+  bool isProcessingPayment = false;
+  bool _isNavigating = false;
 
   // Getters
   double get totalAmount => _totalAmount;
@@ -447,29 +449,59 @@ class BusDetailViewModel extends ChangeNotifier {
   }
 
   Future<void> _fetchAndUpdateBookedSeats() async {
-    final DateTime selectedDate =
-        DateTime.now(); // Use current date or adjust as needed
-    final bookedSeats = await fetchCurrentBookedSeats(selectedDate);
+    final DateTime selectedDate = _selectedDate;
+    try {
+      final busId = bus['id']?.toString();
+      if (busId == null) return;
 
-    // Update _seatData
-    for (var seat in _seatData) {
-      if (seat['type'] == 'seat' &&
-          bookedSeats.contains(int.parse(seat['seatNumber']))) {
-        seat['isBooked'] = true;
-      }
-    }
+      final selectedDateString = DateFormat('yyyy-MM-dd').format(selectedDate);
 
-    // Update _upperSeatData if double decker
-    if (_isDoubleDecker) {
-      for (var seat in _upperSeatData) {
-        if (seat['type'] == 'seat' &&
-            bookedSeats.contains(int.parse(seat['seatNumber']))) {
-          seat['isBooked'] = true;
+      final snapshot = await FirebaseFirestore.instance
+          .collection('bookings')
+          .where('busId', isEqualTo: busId)
+          .where('bookingDate', isEqualTo: selectedDateString)
+          .where('status', isEqualTo: 'confirmed')
+          .get();
+
+      for (var booking in snapshot.docs) {
+        final bookingData = booking.data();
+
+        final bookedSeats = List<int>.from(bookingData['seats'] ?? []);
+        final passengers = List<Map<String, dynamic>>.from(
+          (bookingData['passengers'] as List<dynamic>? ?? []).map(
+            (p) => Map<String, dynamic>.from(p),
+          ),
+        );
+
+        for (int i = 0; i < bookedSeats.length; i++) {
+          final seatNum = bookedSeats[i].toString();
+          final passengerGender = (i < passengers.length)
+              ? (passengers[i]['gender']?.toString().toLowerCase() ?? 'male')
+              : 'male';
+
+          // Update seat info in lower deck
+          for (var seat in _seatData) {
+            if (seat['seatNumber'] == seatNum) {
+              seat['isBooked'] = true;
+              seat['isFemale'] = passengerGender == 'female';
+            }
+          }
+
+          // Update seat info in upper deck
+          for (var seat in _upperSeatData) {
+            if (seat['seatNumber'] == seatNum) {
+              seat['isBooked'] = true;
+              seat['isFemale'] = passengerGender == 'female';
+            }
+          }
         }
       }
-    }
 
-    notifyListeners(); // Notify UI to reflect changes
+      notifyListeners();
+      print("✅ Updated booked seats with gender info");
+    } catch (e) {
+      print('❌ Error updating booked seats with gender info: $e');
+    }
   }
 
   List<Map<String, dynamic>> _getAllSeats() {
@@ -488,11 +520,89 @@ class BusDetailViewModel extends ChangeNotifier {
   }
 
   void _initializeSeats() {
+    final defaultPrice = (bus['ticketPrice'] as num?)?.toDouble() ?? 500.0;
+    final totalSeats = (bus['totalSeat'] as num?)?.toInt() ?? 40;
+    final isSleeper = bus['isSleeper'] == true;
+    _isDoubleDecker =
+        (bus['totalDecker']?.toString().toLowerCase() == 'double');
+
     if (_isDoubleDecker) {
-      _initializeDoubleDecker();
+      // Split seats into lower + upper
+      final half = (totalSeats / 2).ceil();
+      _seatData = _generateLayout(
+        startNumber: 1,
+        seatCount: half,
+        defaultPrice: defaultPrice,
+        category: isSleeper ? 'sleeper' : 'seater',
+      );
+      _upperSeatData = _generateLayout(
+        startNumber: half + 1,
+        seatCount: totalSeats - half,
+        defaultPrice: defaultPrice,
+        category: isSleeper ? 'sleeper' : 'seater',
+      );
     } else {
-      _initializeSingleDecker();
+      // Single decker
+      _seatData = _generateLayout(
+        startNumber: 1,
+        seatCount: totalSeats,
+        defaultPrice: defaultPrice,
+        category: isSleeper ? 'sleeper' : 'seater',
+      );
     }
+  }
+
+  List<Map<String, dynamic>> _generateLayout({
+    required int startNumber,
+    required int seatCount,
+    required double defaultPrice,
+    required String category,
+  }) {
+    final List<Map<String, dynamic>> seats = [];
+    const seatsPerRow = 4;
+    _columns = 5; // 2 seats + aisle + 2 seats
+    int counter = startNumber;
+
+    final rows = (seatCount / seatsPerRow).ceil();
+
+    for (int row = 0; row < rows; row++) {
+      for (int col = 0; col < _columns; col++) {
+        if (col == 2) {
+          // aisle
+          seats.add({
+            'seatNumber': '',
+            'type': 'aisle',
+            'isBooked': false,
+            'isFemale': false,
+            'isFemaleOnly': false,
+            'category': 'empty',
+            'price': 0,
+          });
+        } else if (counter <= startNumber + seatCount - 1) {
+          seats.add({
+            'seatNumber': counter.toString(),
+            'type': 'seat',
+            'isBooked': false,
+            'isFemale': false,
+            'isFemaleOnly': false,
+            'category': category, // sleeper OR seater
+            'price': defaultPrice, // will override via fares collection
+          });
+          counter++;
+        } else {
+          seats.add({
+            'seatNumber': '',
+            'type': 'empty',
+            'isBooked': false,
+            'isFemale': false,
+            'isFemaleOnly': false,
+            'category': 'empty',
+            'price': 0,
+          });
+        }
+      }
+    }
+    return seats;
   }
 
   void _initializeSingleDecker() {
@@ -915,11 +1025,13 @@ class BusDetailViewModel extends ChangeNotifier {
       return false;
     }
 
-    if (seat['isFemaleOnly'] == true && !isFemalePassenger) {
+    // ❌ Male passenger next to a female (already booked or selected)
+    if (!isFemalePassenger && _hasAdjacentFemalePassenger(seatNumber)) {
       return false;
     }
 
-    if (!isFemalePassenger && _hasAdjacentFemalePassenger(seatNumber)) {
+    // ❌ Seat restricted for females only
+    if (seat['isFemaleOnly'] == true && !isFemalePassenger) {
       return false;
     }
 
@@ -979,11 +1091,11 @@ class BusDetailViewModel extends ChangeNotifier {
     }
 
     if (seat['isFemaleOnly'] == true && !isFemalePassenger) {
-      return 'This seat is for female passengers only';
+      return 'This seat is reserved for female passengers only';
     }
 
     if (!isFemalePassenger && _hasAdjacentFemalePassenger(seatNumber)) {
-      return 'Male passengers cannot select seats next to female passengers';
+      return 'Male passengers cannot select seats adjacent to female passengers';
     }
 
     return 'This seat cannot be selected';
@@ -1157,15 +1269,12 @@ class BusDetailViewModel extends ChangeNotifier {
     String paymentMethod = 'Online Payment',
   }) async {
     try {
+      isProcessingPayment = true;
+      notifyListeners();
+
       print('🔄 Starting payment process...');
 
       final paymentAmount = bookingData['totalAmount'] ?? _totalAmount;
-
-      print('   Total Amount: $paymentAmount');
-      print('   Customer: $customerName');
-      print('   Phone: $customerPhone');
-      print('   Email: $customerEmail');
-      print('   Payment Method: $paymentMethod');
 
       if (paymentAmount <= 0) {
         throw Exception("Invalid payment amount: $paymentAmount");
@@ -1173,7 +1282,7 @@ class BusDetailViewModel extends ChangeNotifier {
 
       final orderId = 'ORDER_${DateTime.now().millisecondsSinceEpoch}';
 
-      // Fetch appId and secret key from Firestore
+      // Fetch appId and secret key
       final appId = await CashfreeConfig.getAppId();
       final secretKey = await CashfreeConfig.getSecretKey();
 
@@ -1194,7 +1303,9 @@ class BusDetailViewModel extends ChangeNotifier {
       print('✅ Session ID received: $sessionId');
 
       final session = CFSessionBuilder()
-          .setEnvironment(CFEnvironment.SANDBOX)
+          .setEnvironment(
+            CFEnvironment.SANDBOX,
+          ) // TODO: change to PRODUCTION later
           .setOrderId(orderId)
           .setPaymentSessionId(sessionId)
           .build();
@@ -1209,7 +1320,7 @@ class BusDetailViewModel extends ChangeNotifier {
 
       cfService.setCallback(
         (successOrderId) async {
-          if (paymentCompleted) return; // Prevent multiple callbacks
+          if (paymentCompleted) return;
           paymentCompleted = true;
 
           print('✅ Payment successful for order: $successOrderId');
@@ -1218,6 +1329,7 @@ class BusDetailViewModel extends ChangeNotifier {
               context,
               listen: false,
             );
+
             final bookingId = await saveBooking(
               context,
               bookingsViewModel,
@@ -1226,36 +1338,36 @@ class BusDetailViewModel extends ChangeNotifier {
             );
 
             if (bookingId != null) {
-              clearSelection(); // Clear seats only after successful booking
-              _showSnack(
-                context,
-                "Payment and booking successful! Booking ID: $bookingId",
-                Colors.green,
-              );
-              _showPaymentSuccessDialog(context);
-              Navigator.pop(context, {
-                'status': 'success',
-                'bookingId': bookingId,
-              });
+              clearSelection();
+              isProcessingPayment = false;
+              _isNavigating = false;
+              notifyListeners();
+
+              if (context.mounted) {
+                _showPaymentSuccessDialog(context, bookingId);
+              }
             } else {
               throw Exception("Booking failed after payment");
             }
           } catch (e) {
+            isProcessingPayment = false;
+            _isNavigating = false;
+            notifyListeners();
             print('❌ Error saving booking after payment: $e');
             _showSnack(
               context,
               "Payment successful but booking failed: $e",
               Colors.red,
             );
-            Navigator.pop(context, {
-              'status': 'failed',
-              'message': e.toString(),
-            });
           }
         },
         (CFErrorResponse error, String? failedOrderId) {
-          if (paymentCompleted) return; // Prevent multiple callbacks
+          if (paymentCompleted) return;
           paymentCompleted = true;
+
+          isProcessingPayment = false;
+          _isNavigating = false;
+          notifyListeners();
 
           print('❌ Payment failed: ${error.getMessage()}');
           _showSnack(
@@ -1263,19 +1375,82 @@ class BusDetailViewModel extends ChangeNotifier {
             "Payment failed: ${error.getMessage()}",
             Colors.red,
           );
-          Navigator.pop(context, {
-            'status': 'failed',
-            'message': error.getMessage(),
-          });
         },
       );
 
       print('🚀 Launching payment gateway...');
       await cfService.doPayment(cfWebCheckout);
     } catch (e) {
+      isProcessingPayment = false;
+      _isNavigating = false;
+      notifyListeners();
       print('❌ Payment initiation error: $e');
       _showSnack(context, "Payment error: $e", Colors.red);
-      Navigator.pop(context, {'status': 'failed', 'message': e.toString()});
+    }
+  }
+
+  Future<void> initiateWalletPayment(
+    BuildContext context,
+    String customerName,
+    String customerPhone,
+    String customerEmail,
+    Map<String, dynamic> bookingData,
+    WalletViewModel walletViewModel,
+  ) async {
+    try {
+      isProcessingPayment = true;
+      notifyListeners();
+
+      final paymentAmount = bookingData['totalAmount'] ?? _totalAmount;
+
+      if (paymentAmount <= 0) {
+        throw Exception("Invalid payment amount: $paymentAmount");
+      }
+
+      final currentBalance = walletViewModel.walletBalance ?? 0.0;
+      if (currentBalance < paymentAmount) {
+        isProcessingPayment = false;
+        notifyListeners();
+        _showSnack(
+          context,
+          "Insufficient wallet balance. Please add funds.",
+          Colors.red,
+        );
+        return;
+      }
+
+      final bookingsViewModel = Provider.of<BookingsViewModel>(
+        context,
+        listen: false,
+      );
+
+      await walletViewModel.deductFromWallet(paymentAmount);
+
+      final bookingId = await saveBooking(
+        context,
+        bookingsViewModel,
+        bookingData,
+        paymentMethod: 'Wallet',
+      );
+
+      if (bookingId != null) {
+        clearSelection();
+        isProcessingPayment = false;
+        _isNavigating = false;
+        notifyListeners();
+
+        if (context.mounted) {
+          _showPaymentSuccessDialog(context, bookingId);
+        }
+      } else {
+        throw Exception("Booking failed after wallet payment");
+      }
+    } catch (e) {
+      isProcessingPayment = false;
+      _isNavigating = false;
+      notifyListeners();
+      print('❌ Wallet payment error: $e');
+      _showSnack(context, "Wallet payment failed: $e", Colors.red);
     }
   }
 
@@ -1298,7 +1473,7 @@ class BusDetailViewModel extends ChangeNotifier {
     }
   }
 
-  void _showPaymentSuccessDialog(BuildContext context) {
+  void _showPaymentSuccessDialog(BuildContext context, String bookingId) {
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -1332,8 +1507,18 @@ class BusDetailViewModel extends ChangeNotifier {
             ),
             const SizedBox(height: 12),
             Text(
-              'Your bus ticket has been booked successfully. You will receive a confirmation SMS shortly.',
+              'Your bus ticket has been booked successfully.',
               style: TextStyle(fontSize: 14, color: Colors.grey.shade600),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Booking ID: $bookingId',
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.bold,
+                color: Colors.orange.shade600,
+              ),
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 24),
@@ -1341,8 +1526,10 @@ class BusDetailViewModel extends ChangeNotifier {
               width: double.infinity,
               child: ElevatedButton(
                 onPressed: () {
-                  Navigator.of(context).pop();
-                  Navigator.popUntil(context, (route) => route.isFirst);
+                  Navigator.of(context).pop(); // close dialog
+                  Navigator.of(
+                    context,
+                  ).pushNamedAndRemoveUntil('/home', (route) => false);
                 },
                 style: ElevatedButton.styleFrom(
                   backgroundColor: Colors.green.shade600,
@@ -1352,7 +1539,7 @@ class BusDetailViewModel extends ChangeNotifier {
                   ),
                 ),
                 child: const Text(
-                  'Done',
+                  'Go to Home',
                   style: TextStyle(
                     color: Colors.white,
                     fontSize: 16,
@@ -1428,62 +1615,5 @@ class BusDetailViewModel extends ChangeNotifier {
         duration: const Duration(seconds: 3),
       ),
     );
-  }
-
-  Future<void> initiateWalletPayment(
-    BuildContext context,
-    String customerName,
-    String customerPhone,
-    String customerEmail,
-    Map<String, dynamic> bookingData,
-    WalletViewModel walletViewModel,
-  ) async {
-    try {
-      final paymentAmount = bookingData['totalAmount'] ?? _totalAmount;
-
-      if (paymentAmount <= 0) {
-        throw Exception("Invalid payment amount: $paymentAmount");
-      }
-
-      final currentBalance = walletViewModel.walletBalance ?? 0.0;
-      if (currentBalance < paymentAmount) {
-        _showSnack(
-          context,
-          "Insufficient wallet balance. Please add funds.",
-          Colors.red,
-        );
-        return;
-      }
-
-      final bookingsViewModel = Provider.of<BookingsViewModel>(
-        context,
-        listen: false,
-      );
-
-      await walletViewModel.deductFromWallet(paymentAmount);
-      final bookingId = await saveBooking(
-        context,
-        bookingsViewModel,
-        bookingData,
-        paymentMethod: 'Wallet',
-      );
-
-      if (bookingId != null) {
-        clearSelection();
-        _showSnack(
-          context,
-          "Payment and booking successful! Booking ID: $bookingId",
-          Colors.green,
-        );
-        _showPaymentSuccessDialog(context);
-        Navigator.pop(context, {'status': 'success', 'bookingId': bookingId});
-      } else {
-        throw Exception("Booking failed after wallet payment");
-      }
-    } catch (e) {
-      print('❌ Wallet payment error: $e');
-      _showSnack(context, "Wallet payment failed: $e", Colors.red);
-      Navigator.pop(context, {'status': 'failed', 'message': e.toString()});
-    }
   }
 }
