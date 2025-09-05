@@ -115,10 +115,14 @@ class _WalletScreenState extends State<WalletScreen>
                     padding: const EdgeInsets.all(20),
                     decoration: BoxDecoration(
                       gradient: const LinearGradient(
-                        colors: [Color(0xFF6A11CB), Color(0xFF2575FC)],
+                        colors: [
+                          Color(0xFF43A047),
+                          Color(0xFF66BB6A),
+                        ], // Dark → Light Green
                         begin: Alignment.topLeft,
                         end: Alignment.bottomRight,
                       ),
+
                       borderRadius: BorderRadius.circular(20),
                       boxShadow: [
                         BoxShadow(

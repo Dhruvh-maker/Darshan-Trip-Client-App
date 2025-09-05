@@ -130,6 +130,11 @@ class _PaymentScreenState extends State<PaymentScreen>
   }
 
   void _recalculateWithWallet(WalletViewModel walletVM) {
+    if (_walletUsed > 0) {
+      // Already applied, dobara mat calculate karo
+      return;
+    }
+
     final payable = _finalAmount; // ✅ Use already discounted amount
     final balance = walletVM.walletBalance;
 
@@ -1255,10 +1260,12 @@ class _PaymentScreenState extends State<PaymentScreen>
             ? null
             : () {
                 setState(() {
-                  selectedPaymentMethod = option.id;
-                  if (isWalletOption) {
-                    _recalculateWithWallet(walletVM); // ✅ partial calculate
+                  // Agar dusre method se wallet pe switch kar raha hai tabhi recalc karo
+                  if (selectedPaymentMethod != option.id &&
+                      option.id == 'wallet') {
+                    _recalculateWithWallet(walletVM);
                   }
+                  selectedPaymentMethod = option.id;
                 });
               },
 
@@ -1533,11 +1540,12 @@ class _PaymentScreenState extends State<PaymentScreen>
 
       widget.viewModel.setTotalAmount(_finalAmount);
 
-      // ✅ Wallet flow
       if (selectedPaymentMethod == 'wallet') {
+        if (_walletUsed == 0) {
+          _recalculateWithWallet(walletVM);
+        }
         final balance = walletVM.walletBalance;
 
-        // ---- FULL WALLET PAYMENT ----
         if (_finalAmount == 0 && _walletUsed > 0) {
           final success = await walletVM.deductFromWallet(_walletUsed);
           if (success) {
@@ -1565,9 +1573,7 @@ class _PaymentScreenState extends State<PaymentScreen>
           } else {
             throw Exception("Wallet deduction failed");
           }
-        }
-        // ---- PARTIAL WALLET + OTHER METHOD ----
-        else {
+        } else {
           final success = await walletVM.deductFromWallet(_walletUsed);
           if (!success) throw Exception("Wallet deduction failed");
 
@@ -1590,9 +1596,7 @@ class _PaymentScreenState extends State<PaymentScreen>
             });
           }
         }
-      }
-      // ✅ Normal payment (UPI / Card / NetBanking)
-      else {
+      } else {
         await widget.viewModel.initiatePayment(
           context,
           passengerName,
@@ -1628,106 +1632,105 @@ class _PaymentScreenState extends State<PaymentScreen>
   }
 
   void _showPaymentSuccessDialog(BuildContext context, String bookingId) {
-    if (!mounted) return;
-
-    // No need to reset states here as they're already reset in the calling method
-
-    showDialog(
+    showGeneralDialog(
       context: context,
       barrierDismissible: false,
-      builder: (context) => WillPopScope(
-        onWillPop: () async => false,
-        child: AlertDialog(
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
-          ),
-          contentPadding: const EdgeInsets.all(24),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                padding: const EdgeInsets.all(16),
+      barrierLabel: "PaymentSuccess",
+      pageBuilder: (_, __, ___) {
+        return WillPopScope(
+          onWillPop: () async {
+            Navigator.of(
+              context,
+            ).pushNamedAndRemoveUntil('/home', (route) => false);
+            return false;
+          },
+          child: Center(
+            child: Material(
+              color: Colors.transparent,
+              child: Container(
+                margin: const EdgeInsets.all(24),
+                padding: const EdgeInsets.all(24),
                 decoration: BoxDecoration(
-                  color: Colors.green.shade50,
-                  shape: BoxShape.circle,
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(16),
                 ),
-                child: Icon(
-                  Icons.check_circle,
-                  color: Colors.green.shade600,
-                  size: 48,
-                ),
-              ),
-              const SizedBox(height: 20),
-              const Text(
-                'Payment Successful!',
-                style: TextStyle(
-                  fontSize: 20,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.black87,
-                ),
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 12),
-              Text(
-                'Your bus ticket has been booked successfully. You will receive a confirmation SMS shortly.',
-                style: TextStyle(fontSize: 14, color: Colors.grey.shade600),
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 8),
-              Text(
-                'Booking ID: $bookingId',
-                style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.orange.shade600,
-                ),
-                textAlign: TextAlign.center,
-              ),
-              if (_appliedPromoCode != null) ...[
-                const SizedBox(height: 8),
-                Text(
-                  'You saved ₹${_discountAmount.toStringAsFixed(2)} with ${_appliedPromoCode!['code']}',
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.green.shade600,
-                  ),
-                  textAlign: TextAlign.center,
-                ),
-              ],
-              const SizedBox(height: 24),
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton(
-                  onPressed: () {
-                    Navigator.of(context).pop(); // Close dialog
-                    // Navigate to home screen directly
-                    Navigator.of(context).pushNamedAndRemoveUntil(
-                      '/home',
-                      (route) => false, // Remove all previous routes
-                    );
-                  },
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.green.shade600,
-                    padding: const EdgeInsets.symmetric(vertical: 12),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(8),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: Colors.green.shade50,
+                        shape: BoxShape.circle,
+                      ),
+                      child: Icon(
+                        Icons.check_circle,
+                        color: Colors.green.shade600,
+                        size: 48,
+                      ),
                     ),
-                  ),
-                  child: const Text(
-                    'Go to Home',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 16,
-                      fontWeight: FontWeight.w600,
+                    const SizedBox(height: 20),
+                    const Text(
+                      'Payment Successful!',
+                      style: TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.black87,
+                      ),
+                      textAlign: TextAlign.center,
                     ),
-                  ),
+                    const SizedBox(height: 12),
+                    Text(
+                      'Your bus ticket has been booked successfully.',
+                      style: TextStyle(
+                        fontSize: 14,
+                        color: Colors.grey.shade600,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'Booking ID: $bookingId',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.orange.shade600,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 24),
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton(
+                        onPressed: () {
+                          Navigator.of(
+                            context,
+                          ).pushNamedAndRemoveUntil('/home', (route) => false);
+                        },
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.green.shade600,
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                        ),
+                        child: const Text(
+                          'Go to Home',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ),
-            ],
+            ),
           ),
-        ),
-      ),
+        );
+      },
     );
   }
 

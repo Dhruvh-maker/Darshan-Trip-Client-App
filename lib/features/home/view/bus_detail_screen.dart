@@ -905,8 +905,8 @@ class _BusDetailScreenState extends State<BusDetailScreen> {
                     ),
                     Icon(
                       _showBreakdown
-                          ? Icons.keyboard_arrow_up
-                          : Icons.keyboard_arrow_down,
+                          ? Icons.keyboard_arrow_down
+                          : Icons.keyboard_arrow_up,
                       color: Colors.orange.shade600,
                     ),
                   ],

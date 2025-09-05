@@ -1,3 +1,4 @@
+import 'package:darshan_trip/core/utils/date_utils.dart';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
@@ -515,17 +516,19 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.end,
                     children: [
+                      // ✅ Booked Date
                       Text(
-                        'Booked: ${DateFormat('dd/MM/yyyy').format(bookingTime)}',
+                        'Booked: ${formatFirestoreDate(booking['createdAt'], pattern: 'dd/MM/yyyy')}',
                         style: TextStyle(
                           fontSize: 12,
                           color: Colors.grey.shade600,
                         ),
                       ),
-                      if (booking['lastModifiedAt'] != null &&
-                          booking['lastModifiedAt'] is Timestamp)
+
+                      // ✅ Modified Date (agar hai to hi dikhana)
+                      if (booking['lastModifiedAt'] != null)
                         Text(
-                          'Modified: ${DateFormat('dd/MM/yyyy').format((booking['lastModifiedAt'] as Timestamp).toDate())}',
+                          'Modified: ${formatFirestoreDate(booking['lastModifiedAt'], pattern: 'dd/MM/yyyy')}',
                           style: TextStyle(
                             fontSize: 10,
                             color: Colors.grey.shade500,
@@ -578,8 +581,10 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
     final List<TextEditingController> ageControllers = passengers
         .map((p) => TextEditingController(text: p['age']?.toString() ?? ''))
         .toList();
-    final List<TextEditingController> genderControllers = passengers
-        .map((p) => TextEditingController(text: p['gender']?.toString() ?? ''))
+
+    /// Gender controllers ko dropdown se replace karne ke liye
+    final List<String> genderValues = passengers
+        .map((p) => (p['gender']?.toString().toLowerCase() ?? 'male'))
         .toList();
 
     showDialog(
@@ -633,8 +638,10 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
                         const SizedBox(height: 10),
                         TextField(
                           controller: contactControllers[i],
+                          maxLength: 10, // 🔹 10 digit limit
                           decoration: InputDecoration(
                             labelText: "Contact",
+                            counterText: "", // 🔹 Hide counter text
                             filled: true,
                             fillColor: Colors.grey.shade100,
                             border: OutlineInputBorder(
@@ -657,8 +664,25 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
                           keyboardType: TextInputType.number,
                         ),
                         const SizedBox(height: 10),
-                        TextField(
-                          controller: genderControllers[i],
+
+                        /// 🔹 Dropdown for Gender
+                        DropdownButtonFormField<String>(
+                          value: genderValues[i],
+                          items: const [
+                            DropdownMenuItem(
+                              value: "male",
+                              child: Text("Male"),
+                            ),
+                            DropdownMenuItem(
+                              value: "female",
+                              child: Text("Female"),
+                            ),
+                          ],
+                          onChanged: (value) {
+                            setState(() {
+                              genderValues[i] = value ?? "male";
+                            });
+                          },
                           decoration: InputDecoration(
                             labelText: "Gender",
                             filled: true,
@@ -713,7 +737,7 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
                               'age':
                                   int.tryParse(ageControllers[i].text.trim()) ??
                                   0,
-                              'gender': genderControllers[i].text.trim(),
+                              'gender': genderValues[i],
                             };
                           },
                         );
@@ -778,141 +802,239 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
     final refundAmount = _bookingsViewModel.calculateRefundAmount(booking);
     final refundPercentage = _bookingsViewModel.getRefundPercentage(booking);
 
-    showDialog(
+    showModalBottomSheet(
       context: context,
-      builder: (context) => AlertDialog(
-        title: Row(
-          children: [
-            Icon(Icons.warning, color: Colors.red.shade600),
-            const SizedBox(width: 8),
-            const Text('Cancel Booking'),
-          ],
-        ),
-        content: SingleChildScrollView(
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => DraggableScrollableSheet(
+        expand: false,
+        builder: (_, controller) => Padding(
+          padding: const EdgeInsets.all(16),
           child: Column(
-            mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
+              // 🔹 Pull handle
+              Center(
+                child: Container(
+                  width: 40,
+                  height: 5,
+                  margin: const EdgeInsets.only(bottom: 16),
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade400,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+              ),
+
+              // 🔹 Title
+              Row(
+                children: [
+                  Icon(
+                    Icons.warning_amber_rounded,
+                    color: Colors.red.shade600,
+                    size: 26,
+                  ),
+                  const SizedBox(width: 8),
+                  const Text(
+                    'Cancel Booking',
+                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+
+              const Text(
                 'Are you sure you want to cancel this booking?',
-                style: const TextStyle(fontSize: 16),
+                style: TextStyle(fontSize: 16, color: Colors.black87),
               ),
               const SizedBox(height: 16),
-              Consumer<BookingsViewModel>(
-                builder: (context, viewModel, child) {
-                  final policy = viewModel.cancelPolicy;
-                  if (policy == null) {
-                    return const Column(
-                      mainAxisSize: MainAxisSize.min,
+
+              // 🔹 Policy + Refund Card
+              Expanded(
+                child: Consumer<BookingsViewModel>(
+                  builder: (context, viewModel, child) {
+                    final policy = viewModel.cancelPolicy;
+                    if (policy == null) {
+                      return const Center(child: CircularProgressIndicator());
+                    }
+
+                    return ListView(
+                      controller: controller,
                       children: [
-                        CircularProgressIndicator(),
-                        SizedBox(height: 16),
-                        Text('Loading cancellation policy...'),
+                        Card(
+                          elevation: 2,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Padding(
+                            padding: const EdgeInsets.all(16),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  children: [
+                                    Icon(
+                                      Icons.policy,
+                                      color: Colors.green.shade700,
+                                      size: 20,
+                                    ),
+                                    const SizedBox(width: 8),
+                                    Text(
+                                      'Cancellation Policy',
+                                      style: TextStyle(
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 16,
+                                        color: Colors.green.shade700,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 8),
+                                Text(
+                                  policy['content']?.toString() ??
+                                      'No cancellation policy content available',
+                                  style: const TextStyle(
+                                    fontSize: 13,
+                                    height: 1.4,
+                                    color: Colors.black87,
+                                  ),
+                                ),
+                                const SizedBox(height: 16),
+                                Container(
+                                  padding: const EdgeInsets.all(12),
+                                  decoration: BoxDecoration(
+                                    color: Colors.green.shade50,
+                                    borderRadius: BorderRadius.circular(10),
+                                    border: Border.all(
+                                      color: Colors.green.shade200,
+                                      width: 1,
+                                    ),
+                                  ),
+                                  child: Row(
+                                    children: [
+                                      Icon(
+                                        Icons.attach_money,
+                                        color: Colors.green.shade700,
+                                      ),
+                                      const SizedBox(width: 8),
+                                      Expanded(
+                                        child: Column(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
+                                          children: [
+                                            const Text(
+                                              "Refund Details",
+                                              style: TextStyle(
+                                                fontWeight: FontWeight.bold,
+                                                fontSize: 14,
+                                              ),
+                                            ),
+                                            const SizedBox(height: 4),
+                                            Text(
+                                              'Amount: Rs ${refundAmount.toStringAsFixed(0)}',
+                                              style: const TextStyle(
+                                                fontSize: 13,
+                                                color: Colors.black87,
+                                              ),
+                                            ),
+                                            Text(
+                                              'Percentage: $refundPercentage',
+                                              style: const TextStyle(
+                                                fontSize: 13,
+                                                color: Colors.black87,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
                       ],
                     );
-                  }
+                  },
+                ),
+              ),
 
-                  return Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: Colors.green.shade50,
-                      borderRadius: BorderRadius.circular(8),
+              const SizedBox(height: 12),
+
+              // 🔹 Action Buttons
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () => Navigator.pop(context),
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        side: BorderSide(color: Colors.grey.shade400),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                      child: const Text(
+                        'Keep Booking',
+                        style: TextStyle(fontSize: 15),
+                      ),
                     ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Cancellation Policy:',
-                          style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            color: Colors.green.shade700,
-                          ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: ElevatedButton.icon(
+                      onPressed: () async {
+                        Navigator.pop(context);
+                        final success = await _bookingsViewModel.cancelBooking(
+                          booking['id']?.toString() ?? '',
+                        );
+                        await _bookingsViewModel.verifyBookingStatus(
+                          booking['id']?.toString() ?? '',
+                        );
+                        if (success && mounted) {
+                          await _bookingsViewModel.fetchUserBookings();
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text(
+                                'Booking cancelled successfully! Refund: Rs ${refundAmount.toStringAsFixed(0)}',
+                              ),
+                              backgroundColor: Colors.green,
+                            ),
+                          );
+                        } else if (mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text(
+                                _bookingsViewModel.error ??
+                                    'Failed to cancel booking',
+                              ),
+                              backgroundColor: Colors.red,
+                            ),
+                          );
+                        }
+                      },
+                      icon: const Icon(Icons.delete_forever, size: 18),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.red,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
                         ),
-                        const SizedBox(height: 4),
-                        Text(
-                          policy['content']?.toString() ??
-                              'No cancellation policy content available',
-                          style: const TextStyle(fontSize: 12),
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          'Refund Information:',
-                          style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            color: Colors.green.shade700,
-                          ),
-                        ),
-                        const SizedBox(height: 4),
-                        Text('Amount: Rs ${refundAmount.toStringAsFixed(0)}'),
-                        Text('Percentage: $refundPercentage'),
-                      ],
+                      ),
+                      label: const Text(
+                        'Yes, Cancel',
+                        style: TextStyle(fontSize: 15, color: Colors.white),
+                      ),
                     ),
-                  );
-                },
+                  ),
+                ],
               ),
             ],
           ),
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('No'),
-          ),
-          ElevatedButton(
-            onPressed: () async {
-              Navigator.pop(context);
-
-              print('🎯 Cancel button pressed for booking: ${booking['id']}');
-
-              final success = await _bookingsViewModel.cancelBooking(
-                booking['id']?.toString() ?? '',
-              );
-
-              // Verify the update in Firestore
-              await _bookingsViewModel.verifyBookingStatus(
-                booking['id']?.toString() ?? '',
-              );
-
-              if (success && mounted) {
-                print('✅ Success reported, refreshing bookings...');
-                // Force refresh the bookings list
-                await _bookingsViewModel.fetchUserBookings();
-
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text(
-                      'Booking cancelled successfully! Refund: Rs ${refundAmount.toStringAsFixed(0)}',
-                    ),
-                    backgroundColor: Colors.green,
-                    behavior: SnackBarBehavior.floating,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                  ),
-                );
-              } else if (mounted) {
-                print('❌ Cancellation failed');
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text(
-                      _bookingsViewModel.error ?? 'Failed to cancel booking',
-                    ),
-                    backgroundColor: Colors.red,
-                    behavior: SnackBarBehavior.floating,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                  ),
-                );
-              }
-            },
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-            child: const Text(
-              'Yes, Cancel',
-              style: TextStyle(color: Colors.white),
-            ),
-          ),
-        ],
       ),
     );
   }
@@ -1022,38 +1144,51 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
   }
 
   void _showOperatorPolicy() {
-    showDialog(
+    showModalBottomSheet(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Cancellation & Modification Policy'),
-        content: Consumer<BookingsViewModel>(
-          builder: (context, viewModel, child) {
-            final policy = viewModel.operatorPolicy;
-            if (policy == null) {
-              return const Column(
-                mainAxisSize: MainAxisSize.min,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (context) => DraggableScrollableSheet(
+        expand: false,
+        builder: (_, controller) => Padding(
+          padding: const EdgeInsets.all(16),
+          child: Consumer<BookingsViewModel>(
+            builder: (context, viewModel, child) {
+              final policy = viewModel.operatorPolicy;
+              if (policy == null) {
+                return const Center(child: CircularProgressIndicator());
+              }
+              return ListView(
+                controller: controller,
                 children: [
-                  CircularProgressIndicator(),
-                  SizedBox(height: 16),
-                  Text('Loading policy...'),
+                  Center(
+                    child: Container(
+                      width: 40,
+                      height: 4,
+                      margin: const EdgeInsets.only(bottom: 16),
+                      decoration: BoxDecoration(
+                        color: Colors.grey.shade400,
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                  ),
+                  const Text(
+                    'Cancellation & Modification Policy',
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    policy['content']?.toString() ??
+                        'No policy content available',
+                    style: const TextStyle(fontSize: 14, height: 1.4),
+                  ),
                 ],
               );
-            }
-
-            return SingleChildScrollView(
-              child: Text(
-                policy['content']?.toString() ?? 'No policy content available',
-                style: const TextStyle(fontSize: 14),
-              ),
-            );
-          },
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Close'),
+            },
           ),
-        ],
+        ),
       ),
     );
   }

@@ -122,6 +122,12 @@ class ProfileScreen extends StatelessWidget {
                       title: 'Edit Profile',
                       onTap: () => viewModel.onEditProfileTap(context),
                     ),
+                    _buildListTile(
+                      context,
+                      icon: Icons.verified_user,
+                      title: 'Upload Identity',
+                      onTap: () => viewModel.onUploadIdentityTap(context),
+                    ),
 
                     const SizedBox(height: 24),
                     _buildSectionHeader(context, 'Payments'),

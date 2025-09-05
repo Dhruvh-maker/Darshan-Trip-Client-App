@@ -382,6 +382,34 @@ class AuthViewModel extends ChangeNotifier {
     try {
       String formattedPhone = phone.startsWith('+91') ? phone : '+91$phone';
 
+      // 🔥 Fetch bonus values from Firestore settings/landingPage
+      DocumentSnapshot configDoc = await _firestore
+          .collection('settings')
+          .doc('landingPage')
+          .get();
+
+      // Firestore se data safely read karna
+      final data = configDoc.data() as Map<String, dynamic>;
+
+      double signupBonus;
+      double referralBonus;
+
+      try {
+        signupBonus =
+            (data['signupBonus'] is int || data['signupBonus'] is double)
+            ? (data['signupBonus'] as num).toDouble()
+            : double.tryParse(data['signupBonus'].toString()) ?? 200.0;
+
+        referralBonus =
+            (data['referralBonus'] is int || data['referralBonus'] is double)
+            ? (data['referralBonus'] as num).toDouble()
+            : double.tryParse(data['referralBonus'].toString()) ?? 50.0;
+      } catch (e) {
+        signupBonus = 200.0;
+        referralBonus = 50.0;
+      }
+
+      // Check if user already exists
       QuerySnapshot existingUser = await _firestore
           .collection('users')
           .where('contactNumber', isEqualTo: formattedPhone)
@@ -435,10 +463,10 @@ class AuthViewModel extends ChangeNotifier {
             .collection('users')
             .doc(uniqueId);
 
-        // Calculate wallet balance based on referral
+        // 👇 Wallet balance based on referral
         double initialWalletBalance = hasValidReferral
-            ? 250.0
-            : 200.0; // 250 if referred, 200 if not
+            ? (signupBonus + referralBonus)
+            : signupBonus;
 
         Map<String, dynamic> newUserData = {
           '_id': uniqueId,
@@ -450,7 +478,7 @@ class AuthViewModel extends ChangeNotifier {
           'contactNumber': formattedPhone,
           'password': _hashPassword(password),
           'myReferralCode': _generateReferralCode(name),
-          'referredByCode': referralCode?.trim().toUpperCase() ?? null,
+          'referredByCode': referralCode?.trim().toUpperCase(),
           'walletBalance': initialWalletBalance,
         };
 
@@ -462,7 +490,7 @@ class AuthViewModel extends ChangeNotifier {
         transaction.set(
           newUserRef.collection('walletTransactions').doc(signupTransactionId),
           {
-            'amount': 200.0,
+            'amount': signupBonus,
             'type': 'Signup Bonus',
             'description': 'Welcome bonus for new user',
             'timestamp': FieldValue.serverTimestamp(),
@@ -478,7 +506,7 @@ class AuthViewModel extends ChangeNotifier {
                 .collection('walletTransactions')
                 .doc(referralBonusTransactionId),
             {
-              'amount': 50.0,
+              'amount': referralBonus,
               'type': 'Referral Bonus',
               'description':
                   'Extra bonus for using referral code ${referralCode!.trim().toUpperCase()}',
@@ -487,12 +515,11 @@ class AuthViewModel extends ChangeNotifier {
           );
 
           // Update referrer's wallet balance
-          double referrerBonus = 50.0;
           double currentBalance = (referrerDoc.get('walletBalance') ?? 0.0)
               .toDouble();
 
           transaction.update(referrerDoc.reference, {
-            'walletBalance': currentBalance + referrerBonus,
+            'walletBalance': currentBalance + referralBonus,
           });
 
           // Add referral credit transaction for referrer
@@ -503,7 +530,7 @@ class AuthViewModel extends ChangeNotifier {
                 .collection('walletTransactions')
                 .doc(referrerTransactionId),
             {
-              'amount': referrerBonus,
+              'amount': referralBonus,
               'type': 'Referral Credit',
               'description': 'Referral reward for inviting $name',
               'timestamp': FieldValue.serverTimestamp(),
@@ -512,7 +539,7 @@ class AuthViewModel extends ChangeNotifier {
         }
       });
 
-      // Set current user data
+      // ✅ Update local state
       _currentUserId = uniqueId;
       _currentUserData = {
         'id': uniqueId,
@@ -524,10 +551,11 @@ class AuthViewModel extends ChangeNotifier {
         'contactNumber': formattedPhone,
         'myReferralCode': _generateReferralCode(name),
         'referredByCode': referralCode?.trim().toUpperCase(),
-        'walletBalance': hasValidReferral ? 250.0 : 200.0,
+        'walletBalance': hasValidReferral
+            ? (signupBonus + referralBonus)
+            : signupBonus,
       };
 
-      // Create anonymous Firebase Auth user for compatibility
       try {
         await _auth.signInAnonymously();
       } catch (e) {
@@ -541,16 +569,16 @@ class AuthViewModel extends ChangeNotifier {
       await prefs.setString('userEmail', email);
       await prefs.setBool('isLoggedIn', true);
 
-      // Force refresh wallet data after successful signup
+      // Refresh wallet
       await Provider.of<WalletViewModel>(
         context,
         listen: false,
       ).refreshWalletAfterLogin();
 
-      // Show appropriate success message
+      // Show dynamic success message
       String successMessage = hasValidReferral
-          ? "Account created successfully! 🎊 ₹250 has been added to your wallet (₹200 signup bonus + ₹50 referral bonus)"
-          : "Account created successfully! 🎊 ₹200 has been added to your wallet";
+          ? "Account created successfully! 🎊 ₹${signupBonus + referralBonus} has been added to your wallet (₹$signupBonus signup bonus + ₹$referralBonus referral bonus)"
+          : "Account created successfully! 🎊 ₹$signupBonus has been added to your wallet";
 
       _showSnackBar(
         context,

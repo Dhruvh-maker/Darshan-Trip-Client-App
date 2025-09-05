@@ -1,3 +1,4 @@
+import 'package:darshan_trip/core/utils/date_utils.dart';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
@@ -27,9 +28,8 @@ class BusTicketScreen extends StatelessWidget {
       bookingDate = DateTime.now();
     }
 
-    final bookingTime = booking['createdAt'] is Timestamp
-        ? (booking['createdAt'] as Timestamp).toDate()
-        : DateTime.now();
+    final bookingTime = parseFirestoreDate(booking['createdAt']);
+
     final status = booking['status']?.toString() ?? 'unknown';
     final seats =
         (booking['seats'] as List<dynamic>?)
@@ -62,20 +62,58 @@ class BusTicketScreen extends StatelessWidget {
         ),
         backgroundColor: const Color(0xFFF5A623),
         elevation: 0,
-        iconTheme: const IconThemeData(
-          color: Colors.white,
-        ), // 👈 Back Icon White
+        iconTheme: const IconThemeData(color: Colors.white),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.share, color: Colors.white),
-            onPressed: () => _shareTicket(context, booking, busData),
-            tooltip: 'Share Ticket',
-          ),
-          IconButton(
-            icon: const Icon(Icons.download, color: Colors.white),
-            onPressed: () => _downloadTicketAsPDF(context, booking, busData),
-            tooltip: 'Download Ticket',
-          ),
+          if (status == 'confirmed') ...[
+            IconButton(
+              icon: const Icon(Icons.share, color: Colors.white),
+              onPressed: () => _shareTicket(context, booking, busData),
+              tooltip: 'Share Ticket',
+            ),
+            IconButton(
+              icon: const Icon(Icons.download, color: Colors.white),
+              onPressed: () => _downloadTicketAsPDF(context, booking, busData),
+              tooltip: 'Download Ticket',
+            ),
+            if (canCancelOrModify)
+              PopupMenuButton<String>(
+                onSelected: (String value) {
+                  switch (value) {
+                    case 'modify':
+                      _showModifyDialog(context, booking);
+                      break;
+                    case 'cancel':
+                      _showCancelDialog(context, booking);
+                      break;
+                  }
+                },
+                itemBuilder: (BuildContext context) {
+                  return [
+                    const PopupMenuItem<String>(
+                      value: 'modify',
+                      child: Row(
+                        children: [
+                          Icon(Icons.edit, color: Colors.blue, size: 18),
+                          SizedBox(width: 8),
+                          Text('Modify Booking'),
+                        ],
+                      ),
+                    ),
+                    const PopupMenuItem<String>(
+                      value: 'cancel',
+                      child: Row(
+                        children: [
+                          Icon(Icons.cancel, color: Colors.red, size: 18),
+                          SizedBox(width: 8),
+                          Text('Cancel Booking'),
+                        ],
+                      ),
+                    ),
+                  ];
+                },
+                icon: const Icon(Icons.more_vert, color: Colors.white),
+              ),
+          ],
         ],
       ),
 
@@ -614,22 +652,24 @@ class BusTicketScreen extends StatelessWidget {
                                     'N/A',
                               ),
                               const SizedBox(height: 12),
+
+                              // ✅ Booked On
                               _buildTicketDetailRow(
                                 'Booked On',
-                                DateFormat(
-                                  'dd/MM/yyyy HH:mm',
-                                ).format(bookingTime),
+                                formatFirestoreDate(booking['createdAt']),
                               ),
+
+                              // ✅ Last Modified (agar hai to hi dikhana)
                               if (booking['lastModifiedAt'] != null) ...[
                                 const SizedBox(height: 12),
                                 _buildTicketDetailRow(
                                   'Last Modified',
-                                  DateFormat('dd/MM/yyyy HH:mm').format(
-                                    (booking['lastModifiedAt'] as Timestamp)
-                                        .toDate(),
+                                  formatFirestoreDate(
+                                    booking['lastModifiedAt'],
                                   ),
                                 ),
                               ],
+
                               if ((booking['modificationCount'] ?? 0) > 0) ...[
                                 const SizedBox(height: 12),
                                 _buildTicketDetailRow(
@@ -640,49 +680,8 @@ class BusTicketScreen extends StatelessWidget {
                             ],
                           ),
                         ),
+
                         const SizedBox(height: 20),
-                        if (canCancelOrModify) ...[
-                          Row(
-                            children: [
-                              Expanded(
-                                child: ElevatedButton(
-                                  onPressed: () =>
-                                      _showModifyDialog(context, booking),
-                                  style: ElevatedButton.styleFrom(
-                                    backgroundColor: Colors.blue,
-                                    foregroundColor: Colors.white,
-                                    padding: const EdgeInsets.symmetric(
-                                      vertical: 12,
-                                    ),
-                                    shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(10),
-                                    ),
-                                  ),
-                                  child: const Text('Modify Booking'),
-                                ),
-                              ),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                child: ElevatedButton(
-                                  onPressed: () =>
-                                      _showCancelDialog(context, booking),
-                                  style: ElevatedButton.styleFrom(
-                                    backgroundColor: Colors.red,
-                                    foregroundColor: Colors.white,
-                                    padding: const EdgeInsets.symmetric(
-                                      vertical: 12,
-                                    ),
-                                    shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(10),
-                                    ),
-                                  ),
-                                  child: const Text('Cancel Booking'),
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 12),
-                        ],
                         Container(
                           width: double.infinity,
                           padding: const EdgeInsets.all(16),
@@ -1383,114 +1382,234 @@ Status: ${booking['status']?.toString().toUpperCase() ?? 'UNKNOWN'}
   }
 
   void _showModifyDialog(BuildContext context, Map<String, dynamic> booking) {
-    final TextEditingController nameController = TextEditingController(
-      text: booking['passengerName']?.toString() ?? '',
-    );
-    final TextEditingController contactController = TextEditingController(
-      text: booking['passengerContact']?.toString() ?? '',
-    );
-    final TextEditingController pickupController = TextEditingController(
-      text: booking['pickupPoint']?.toString() ?? '',
-    );
+    final passengers =
+        (booking['passengers'] as List<dynamic>?)
+            ?.map((p) => Map<String, dynamic>.from(p))
+            .toList() ??
+        [];
+
+    final List<TextEditingController> nameControllers = passengers
+        .map((p) => TextEditingController(text: p['name']?.toString() ?? ''))
+        .toList();
+    final List<TextEditingController> contactControllers = passengers
+        .map((p) => TextEditingController(text: p['contact']?.toString() ?? ''))
+        .toList();
+    final List<TextEditingController> ageControllers = passengers
+        .map((p) => TextEditingController(text: p['age']?.toString() ?? ''))
+        .toList();
+
+    /// Gender values ko dropdown ke liye list banaya
+    final List<String> genderValues = passengers
+        .map((p) => (p['gender']?.toString().toLowerCase() ?? 'male'))
+        .toList();
 
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Modify Booking'),
-        content: SingleChildScrollView(
+      builder: (context) => Dialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        insetPadding: const EdgeInsets.all(16),
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(16),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              TextField(
-                controller: nameController,
-                decoration: const InputDecoration(
-                  labelText: 'Passenger Name',
-                  border: OutlineInputBorder(),
-                ),
+              const Text(
+                "Modify Booking",
+                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
               ),
               const SizedBox(height: 16),
-              TextField(
-                controller: contactController,
-                decoration: const InputDecoration(
-                  labelText: 'Contact Number',
-                  border: OutlineInputBorder(),
+
+              // Passenger forms
+              for (int i = 0; i < passengers.length; i++) ...[
+                Card(
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  elevation: 2,
+                  margin: const EdgeInsets.symmetric(vertical: 8),
+                  child: Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          "Passenger ${i + 1}",
+                          style: const TextStyle(
+                            fontWeight: FontWeight.bold,
+                            color: Colors.orange,
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                        TextField(
+                          controller: nameControllers[i],
+                          decoration: InputDecoration(
+                            labelText: "Name",
+                            filled: true,
+                            fillColor: Colors.grey.shade100,
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                        TextField(
+                          controller: contactControllers[i],
+                          maxLength: 10, // 🔹 only 10 digits allowed
+                          decoration: InputDecoration(
+                            labelText: "Contact",
+                            counterText: "", // 🔹 hides counter
+                            filled: true,
+                            fillColor: Colors.grey.shade100,
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                          ),
+                          keyboardType: TextInputType.phone,
+                        ),
+                        const SizedBox(height: 10),
+                        TextField(
+                          controller: ageControllers[i],
+                          decoration: InputDecoration(
+                            labelText: "Age",
+                            filled: true,
+                            fillColor: Colors.grey.shade100,
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                          ),
+                          keyboardType: TextInputType.number,
+                        ),
+                        const SizedBox(height: 10),
+
+                        /// 🔹 Dropdown for Gender
+                        DropdownButtonFormField<String>(
+                          value: genderValues[i],
+                          items: const [
+                            DropdownMenuItem(
+                              value: "male",
+                              child: Text("Male"),
+                            ),
+                            DropdownMenuItem(
+                              value: "female",
+                              child: Text("Female"),
+                            ),
+                          ],
+                          onChanged: (value) {
+                            genderValues[i] = value ?? "male";
+                          },
+                          decoration: InputDecoration(
+                            labelText: "Gender",
+                            filled: true,
+                            fillColor: Colors.grey.shade100,
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
                 ),
-                keyboardType: TextInputType.phone,
-                maxLength: 10,
-              ),
-              const SizedBox(height: 16),
-              TextField(
-                controller: pickupController,
-                decoration: const InputDecoration(
-                  labelText: 'Pickup Point',
-                  border: OutlineInputBorder(),
-                ),
-              ),
-              const SizedBox(height: 16),
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: Colors.amber.shade50,
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.amber.shade300),
-                ),
-                child: const Text(
-                  'Note: Date and seat modifications have additional fees and restrictions. Contact support for major changes.',
-                  style: TextStyle(fontSize: 12),
-                ),
+              ],
+
+              const SizedBox(height: 20),
+
+              // Buttons row
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () => Navigator.pop(context),
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        side: BorderSide(color: Colors.orange.shade600),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                      child: Text(
+                        "Cancel",
+                        style: TextStyle(
+                          color: Colors.orange.shade600,
+                          fontSize: 16,
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: ElevatedButton(
+                      onPressed: () async {
+                        Navigator.pop(context);
+
+                        final updatedPassengers = List.generate(
+                          passengers.length,
+                          (i) {
+                            return {
+                              'name': nameControllers[i].text.trim(),
+                              'contact': contactControllers[i].text.trim(),
+                              'age':
+                                  int.tryParse(ageControllers[i].text.trim()) ??
+                                  0,
+                              'gender': genderValues[i],
+                            };
+                          },
+                        );
+
+                        final bookingsViewModel = context
+                            .read<BookingsViewModel>();
+                        final success = await bookingsViewModel.modifyBooking(
+                          bookingId: booking['id']?.toString() ?? '',
+                          updatedPassengers: updatedPassengers,
+                        );
+
+                        if (success && context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: const Text(
+                                'Booking modified successfully',
+                              ),
+                              backgroundColor: Colors.green,
+                              behavior: SnackBarBehavior.floating,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                            ),
+                          );
+                        } else if (context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text(
+                                bookingsViewModel.error ??
+                                    'Failed to modify booking',
+                              ),
+                              backgroundColor: Colors.red,
+                              behavior: SnackBarBehavior.floating,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                            ),
+                          );
+                        }
+                      },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.orange.shade600,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                      child: const Text(
+                        "Save Changes",
+                        style: TextStyle(color: Colors.white, fontSize: 16),
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ],
           ),
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () async {
-              Navigator.pop(context);
-              final bookingsViewModel = context.read<BookingsViewModel>();
-              final success = await bookingsViewModel.modifyBooking(
-                bookingId: booking['id']?.toString() ?? '',
-                newPassengerName: nameController.text.trim(),
-                newPassengerContact: contactController.text.trim(),
-                newPickupPoint: pickupController.text.trim(),
-              );
-
-              if (success) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: const Text('Booking modified successfully'),
-                    backgroundColor: Colors.green,
-                    behavior: SnackBarBehavior.floating,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                  ),
-                );
-              } else {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text(
-                      bookingsViewModel.error ?? 'Failed to modify booking',
-                    ),
-                    backgroundColor: Colors.red,
-                    behavior: SnackBarBehavior.floating,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                  ),
-                );
-              }
-            },
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.blue),
-            child: const Text(
-              'Save Changes',
-              style: TextStyle(color: Colors.white),
-            ),
-          ),
-        ],
       ),
     );
   }
@@ -1500,125 +1619,245 @@ Status: ${booking['status']?.toString().toUpperCase() ?? 'UNKNOWN'}
     final refundAmount = bookingsViewModel.calculateRefundAmount(booking);
     final refundPercentage = bookingsViewModel.getRefundPercentage(booking);
 
-    showDialog(
+    showModalBottomSheet(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Cancel Booking'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'Are you sure you want to cancel this booking?',
-              style: TextStyle(fontSize: 16),
-            ),
-            const SizedBox(height: 16),
-            Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  colors: [Colors.green.shade50, Colors.green.shade100],
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => DraggableScrollableSheet(
+        expand: false,
+        builder: (_, controller) => Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // 🔹 Pull handle
+              Center(
+                child: Container(
+                  width: 40,
+                  height: 5,
+                  margin: const EdgeInsets.only(bottom: 16),
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade400,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
                 ),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: Colors.green.shade300),
               ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+
+              // 🔹 Title
+              Row(
                 children: [
-                  Text(
-                    'Refund Information',
-                    style: TextStyle(
-                      fontWeight: FontWeight.bold,
-                      color: Colors.green.shade700,
-                      fontSize: 14,
+                  Icon(
+                    Icons.warning_amber_rounded,
+                    color: Colors.red.shade600,
+                    size: 26,
+                  ),
+                  const SizedBox(width: 8),
+                  const Text(
+                    'Cancel Booking',
+                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                  ),
+                ],
+              ),
+
+              const SizedBox(height: 12),
+              const Text(
+                'Are you sure you want to cancel this booking?',
+                style: TextStyle(fontSize: 16, color: Colors.black87),
+              ),
+              const SizedBox(height: 16),
+
+              // 🔹 Policy + Refund Card
+              Expanded(
+                child: Consumer<BookingsViewModel>(
+                  builder: (context, viewModel, child) {
+                    final policy = viewModel.cancelPolicy;
+                    if (policy == null) {
+                      return const Center(child: CircularProgressIndicator());
+                    }
+
+                    return ListView(
+                      controller: controller,
+                      children: [
+                        Card(
+                          elevation: 2,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Padding(
+                            padding: const EdgeInsets.all(16),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  children: [
+                                    Icon(
+                                      Icons.policy,
+                                      color: Colors.green.shade700,
+                                      size: 20,
+                                    ),
+                                    const SizedBox(width: 8),
+                                    Text(
+                                      'Cancellation Policy',
+                                      style: TextStyle(
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 16,
+                                        color: Colors.green.shade700,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 8),
+                                Text(
+                                  policy['content']?.toString() ??
+                                      'No cancellation policy content available',
+                                  style: const TextStyle(
+                                    fontSize: 13,
+                                    height: 1.4,
+                                    color: Colors.black87,
+                                  ),
+                                ),
+                                const SizedBox(height: 16),
+                                Container(
+                                  padding: const EdgeInsets.all(12),
+                                  decoration: BoxDecoration(
+                                    color: Colors.green.shade50,
+                                    borderRadius: BorderRadius.circular(10),
+                                    border: Border.all(
+                                      color: Colors.green.shade200,
+                                      width: 1,
+                                    ),
+                                  ),
+                                  child: Row(
+                                    children: [
+                                      Icon(
+                                        Icons.attach_money,
+                                        color: Colors.green.shade700,
+                                      ),
+                                      const SizedBox(width: 8),
+                                      Expanded(
+                                        child: Column(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
+                                          children: [
+                                            const Text(
+                                              "Refund Details",
+                                              style: TextStyle(
+                                                fontWeight: FontWeight.bold,
+                                                fontSize: 14,
+                                              ),
+                                            ),
+                                            const SizedBox(height: 4),
+                                            Text(
+                                              'Amount: Rs ${refundAmount.toStringAsFixed(0)}',
+                                              style: const TextStyle(
+                                                fontSize: 13,
+                                                color: Colors.black87,
+                                              ),
+                                            ),
+                                            Text(
+                                              'Percentage: $refundPercentage',
+                                              style: const TextStyle(
+                                                fontSize: 13,
+                                                color: Colors.black87,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
+                    );
+                  },
+                ),
+              ),
+
+              const SizedBox(height: 12),
+
+              // 🔹 Action Buttons
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () => Navigator.pop(context),
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        side: BorderSide(color: Colors.grey.shade400),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                      child: const Text(
+                        'Keep Booking',
+                        style: TextStyle(fontSize: 15),
+                      ),
                     ),
                   ),
-                  const SizedBox(height: 12),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      const Text('Refund Amount:'),
-                      Text(
-                        'Rs ${refundAmount.toStringAsFixed(0)}',
-                        style: const TextStyle(fontWeight: FontWeight.bold),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: ElevatedButton.icon(
+                      onPressed: () async {
+                        Navigator.pop(context);
+
+                        final success = await bookingsViewModel.cancelBooking(
+                          booking['id']?.toString() ?? '',
+                        );
+
+                        await bookingsViewModel.verifyBookingStatus(
+                          booking['id']?.toString() ?? '',
+                        );
+
+                        if (success && context.mounted) {
+                          await bookingsViewModel.fetchUserBookings();
+
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text(
+                                'Booking cancelled successfully! Refund: Rs ${refundAmount.toStringAsFixed(0)}',
+                              ),
+                              backgroundColor: Colors.green,
+                            ),
+                          );
+
+                          Navigator.pop(context); // Back to bookings
+                        } else if (context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text(
+                                bookingsViewModel.error ??
+                                    'Failed to cancel booking',
+                              ),
+                              backgroundColor: Colors.red,
+                            ),
+                          );
+                        }
+                      },
+                      icon: const Icon(Icons.delete_forever, size: 18),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.red,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
                       ),
-                    ],
-                  ),
-                  const SizedBox(height: 4),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      const Text('Refund Percentage:'),
-                      Text(
-                        refundPercentage,
-                        style: const TextStyle(fontWeight: FontWeight.bold),
+                      label: const Text(
+                        'Yes, Cancel',
+                        style: TextStyle(fontSize: 15, color: Colors.white),
                       ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  Container(
-                    padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                      color: Colors.blue.shade50,
-                      borderRadius: BorderRadius.circular(6),
-                    ),
-                    child: const Text(
-                      'Refunds will be processed within 5-7 business days to your original payment method.',
-                      style: TextStyle(fontSize: 11),
                     ),
                   ),
                 ],
               ),
-            ),
-          ],
+            ],
+          ),
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Keep Booking'),
-          ),
-          ElevatedButton(
-            onPressed: () async {
-              Navigator.pop(context);
-              final success = await bookingsViewModel.cancelBooking(
-                booking['id']?.toString() ?? '',
-              );
-
-              if (success) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text(
-                      'Booking cancelled successfully! Refund: Rs ${refundAmount.toStringAsFixed(0)}',
-                    ),
-                    backgroundColor: Colors.green,
-                    behavior: SnackBarBehavior.floating,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                  ),
-                );
-              } else {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text(
-                      bookingsViewModel.error ?? 'Failed to cancel booking',
-                    ),
-                    backgroundColor: Colors.red,
-                    behavior: SnackBarBehavior.floating,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                  ),
-                );
-              }
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.red,
-              foregroundColor: Colors.white,
-            ),
-            child: const Text('Yes, Cancel'),
-          ),
-        ],
       ),
     );
   }

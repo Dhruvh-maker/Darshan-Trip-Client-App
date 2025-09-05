@@ -6,9 +6,9 @@ import 'package:darshan_trip/features/mybookings/view/my_bookings_screen.dart';
 import 'package:darshan_trip/features/profile/view/about_screen.dart';
 import 'package:darshan_trip/features/profile/view/edit_profile_screen.dart';
 import 'package:darshan_trip/features/profile/view/help_screen.dart';
+import 'package:darshan_trip/features/profile/view/identity_upload_screen.dart';
 import 'package:darshan_trip/features/profile/view/logout_screen.dart';
 import 'package:darshan_trip/features/profile/view/passengers_screen.dart';
-import 'package:darshan_trip/features/profile/view/personal_info_screen.dart';
 import 'package:darshan_trip/features/profile/view/rate_app_screen.dart';
 import 'package:darshan_trip/features/profile/view/referrals_screen.dart';
 import 'package:darshan_trip/features/profile/view/wallet_screen.dart';
@@ -67,8 +67,6 @@ class AppRoutes {
 
     '/bookings': (context) => const AuthGuard(child: MyBookingsScreen()),
 
-    '/personal-info': (context) => const AuthGuard(child: PersonalInfoScreen()),
-
     '/passengers': (context) => const AuthGuard(child: PassengersScreen()),
 
     '/wallet': (context) => const AuthGuard(child: WalletScreen()),
@@ -77,6 +75,7 @@ class AppRoutes {
 
     '/logout': (context) => const AuthGuard(child: LogoutScreen()),
     '/edit-profile': (context) => const EditProfileScreen(),
+    '/upload-identity': (context) => const IdentityUploadScreen(),
 
     // Semi-protected routes (can be accessed but with proper handling)
     '/about': (context) => const AboutScreen(),

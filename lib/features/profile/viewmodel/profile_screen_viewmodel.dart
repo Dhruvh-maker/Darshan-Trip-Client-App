@@ -9,6 +9,7 @@ class ProfileScreenViewModel extends ChangeNotifier {
   String gender = "Loading...";
   String age = "Loading...";
   String contactNumber = "Loading...";
+  String kutiName = "Loading...";
   String profileImage =
       "https://ui-avatars.com/api/?name=User&size=72&background=F5A623&color=fff";
 
@@ -22,6 +23,19 @@ class ProfileScreenViewModel extends ChangeNotifier {
 
   Future<void> saveDocumentPath(String path) async {
     localDocumentPath = path;
+
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    await prefs.setString('identityDocumentPath', path);
+
+    notifyListeners();
+  }
+
+  Future<void> removeDocumentPath() async {
+    localDocumentPath = null;
+
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    await prefs.remove('identityDocumentPath');
+
     notifyListeners();
   }
 
@@ -40,8 +54,10 @@ class ProfileScreenViewModel extends ChangeNotifier {
       SharedPreferences prefs = await SharedPreferences.getInstance();
       String? phone = prefs.getString('userPhone');
 
+      // ✅ Load saved document path on startup
+      localDocumentPath = prefs.getString('identityDocumentPath');
+
       if (phone != null && phone.isNotEmpty) {
-        // Query Firestore to get user data based on contactNumber
         QuerySnapshot userQuery = await _firestore
             .collection('users')
             .where('contactNumber', isEqualTo: phone)
@@ -55,22 +71,19 @@ class ProfileScreenViewModel extends ChangeNotifier {
           gender = userData['gender'] ?? "Not set";
           age = userData['age']?.toString() ?? "Not set";
           contactNumber = userData['contactNumber'] ?? "Not set";
+          kutiName = userData['kutiName'] ?? "Not set";
 
-          // Update profile image URL with actual name
           profileImage =
               "https://ui-avatars.com/api/?name=${Uri.encodeComponent(userName)}&size=72&background=F5A623&color=fff";
         } else {
-          // No user found in Firestore, try SharedPreferences fallback
           await _loadFromSharedPreferences(prefs);
         }
       } else {
-        // No phone in SharedPreferences
         await _loadFromSharedPreferences(prefs);
       }
     } catch (e) {
       print("Error fetching user profile: $e");
 
-      // Try fallback to SharedPreferences on error
       try {
         SharedPreferences prefs = await SharedPreferences.getInstance();
         await _loadFromSharedPreferences(prefs);
@@ -88,10 +101,12 @@ class ProfileScreenViewModel extends ChangeNotifier {
     }
   }
 
-  // Helper method to load from SharedPreferences
   Future<void> _loadFromSharedPreferences(SharedPreferences prefs) async {
     String? savedName = prefs.getString('userName');
     String? savedEmail = prefs.getString('userEmail');
+
+    // ✅ Load saved document path
+    localDocumentPath = prefs.getString('identityDocumentPath');
 
     if (savedName != null && savedEmail != null) {
       userName = savedName;
@@ -148,50 +163,51 @@ class ProfileScreenViewModel extends ChangeNotifier {
     Navigator.pushNamed(context, '/edit-profile');
   }
 
+  void onUploadIdentityTap(BuildContext context) {
+    Navigator.pushNamed(context, '/upload-identity');
+  }
+
   Future<void> uploadIdentityDocument(String filePath) async {
     try {
-      // Store file in Firestore Storage (if using Firebase Storage)
-      // For now, just print as placeholder
       print("Uploading file: $filePath");
-      // TODO: implement Firebase Storage upload
+      // TODO: Firebase Storage upload logic
     } catch (e) {
       print("Error uploading document: $e");
     }
   }
 
   // Update Personal Info
+
   Future<void> updatePersonalInfo(
     String newName,
     String newEmail,
     String newGender,
     String newAge,
     String newContactNumber,
+    String newKutiya,
   ) async {
     _isLoading = true;
     notifyListeners();
 
     try {
-      // Validate inputs
       if (newName.trim().isEmpty) {
         throw Exception("Name cannot be empty");
       }
-
       if (newEmail.trim().isEmpty || !_isValidEmail(newEmail)) {
         throw Exception("Please enter a valid email");
       }
 
       SharedPreferences prefs = await SharedPreferences.getInstance();
-
       String? userId = prefs.getString('userId');
 
       if (userId != null) {
-        // Update in Firestore
         await _firestore.collection('users').doc(userId).update({
           'name': newName.trim(),
           'email': newEmail.trim(),
           'gender': newGender.trim(),
           'age': newAge.trim(),
           'contactNumber': newContactNumber.trim(),
+          'kutiName': newKutiya.trim(),
         });
 
         await prefs.setString('userName', newName.trim());
@@ -200,12 +216,12 @@ class ProfileScreenViewModel extends ChangeNotifier {
         await prefs.setString('userAge', newAge.trim());
         await prefs.setString('userPhone', newContactNumber.trim());
 
-        // Update local state
         userName = newName.trim();
         email = newEmail.trim();
         gender = newGender.trim();
         age = newAge.trim();
         contactNumber = newContactNumber.trim();
+        kutiName = newKutiya.trim();
         profileImage =
             "https://ui-avatars.com/api/?name=${Uri.encodeComponent(userName)}&size=72&background=F5A623&color=fff";
 
@@ -215,7 +231,7 @@ class ProfileScreenViewModel extends ChangeNotifier {
       }
     } catch (e) {
       print("❌ Error updating profile: $e");
-      throw e; // Re-throw to handle in UI
+      throw e;
     } finally {
       _isLoading = false;
       notifyListeners();
@@ -236,7 +252,8 @@ class ProfileScreenViewModel extends ChangeNotifier {
     String newEmail,
     String newGender,
     String newAge,
-    String newContactNumber, {
+    String newContactNumber,
+    String newKutiya, {
     Function()? onSuccess,
     Function(String error)? onError,
   }) async {
@@ -247,6 +264,7 @@ class ProfileScreenViewModel extends ChangeNotifier {
         newGender,
         newAge,
         newContactNumber,
+        newKutiya,
       );
       onSuccess?.call();
     } catch (e) {
