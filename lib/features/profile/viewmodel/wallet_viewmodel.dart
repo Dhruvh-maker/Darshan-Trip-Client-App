@@ -306,6 +306,76 @@ class WalletViewModel extends ChangeNotifier {
       return false;
     }
   }
+  // Add this method to your WalletViewModel class
+
+  Future<bool> addToWallet(double amount, String description) async {
+    if (amount <= 0) {
+      print("❌ Invalid amount to add: $amount");
+      return false;
+    }
+
+    // Get user phone from SharedPreferences or Firebase Auth
+    String? phoneToUse;
+    User? currentUser = _auth.currentUser;
+
+    if (currentUser != null && currentUser.phoneNumber != null) {
+      phoneToUse = currentUser.phoneNumber!;
+    } else {
+      final prefs = await SharedPreferences.getInstance();
+      phoneToUse = prefs.getString('userPhone');
+    }
+
+    if (phoneToUse == null) {
+      print("❌ Cannot add to wallet. No user phone available.");
+      return false;
+    }
+
+    try {
+      QuerySnapshot userQuery = await _firestore
+          .collection('users')
+          .where('contactNumber', isEqualTo: phoneToUse)
+          .limit(1)
+          .get();
+
+      if (userQuery.docs.isEmpty) {
+        print("❌ User not found in Firestore.");
+        return false;
+      }
+
+      DocumentSnapshot userDoc = userQuery.docs.first;
+
+      // Update wallet balance locally and in Firestore
+      _walletBalance += amount;
+      await userDoc.reference.update({'walletBalance': _walletBalance});
+
+      // Cache updated balance
+      await _cacheWalletData();
+
+      // Add credit transaction
+      final transaction = WalletTransaction(
+        id: DateTime.now().millisecondsSinceEpoch.toString(),
+        amount: amount,
+        type: 'Refund',
+        description: description,
+        timestamp: Timestamp.now(),
+      );
+
+      await userDoc.reference
+          .collection('walletTransactions')
+          .doc(transaction.id)
+          .set(transaction.toMap());
+
+      _transactions.insert(0, transaction);
+      print("✅ Amount added to wallet: $amount");
+      notifyListeners();
+      return true;
+    } catch (e) {
+      print("❌ Error adding to wallet: $e");
+      // Revert local balance on error
+      _walletBalance -= amount;
+      return false;
+    }
+  }
 
   Future<bool> processWalletPayment({
     required double amount,

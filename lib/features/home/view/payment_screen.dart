@@ -38,6 +38,9 @@ class _PaymentScreenState extends State<PaymentScreen>
   String? selectedPaymentMethod;
   bool isProcessingPayment = false;
   bool _isNavigating = false;
+
+  // Wallet control variables
+  bool _useWallet = false; // NEW: User's choice to use wallet
   late AnimationController _fadeController;
   late AnimationController _slideController;
   late Animation<double> _fadeAnimation;
@@ -95,7 +98,6 @@ class _PaymentScreenState extends State<PaymentScreen>
     print('   Bus Details: ${widget.busDetails}');
     print('   Booking Data: ${widget.bookingData}');
 
-    // Initialize final amount with original total
     _finalAmount =
         widget.bookingData['totalAmount']?.toDouble() ?? widget.totalAmount;
 
@@ -117,6 +119,14 @@ class _PaymentScreenState extends State<PaymentScreen>
           CurvedAnimation(parent: _slideController, curve: Curves.easeOutCubic),
         );
 
+    // ✅ Wallet & promo ko include kar ke initial calculation
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        final walletVM = context.read<WalletViewModel>();
+        _calculateAmounts(walletVM);
+      }
+    });
+
     _fadeController.forward();
     _slideController.forward();
   }
@@ -129,22 +139,190 @@ class _PaymentScreenState extends State<PaymentScreen>
     super.dispose();
   }
 
-  void _recalculateWithWallet(WalletViewModel walletVM) {
-    if (_walletUsed > 0) {
-      // Already applied, dobara mat calculate karo
-      return;
-    }
+  void _calculateAmounts(WalletViewModel walletVM) {
+    final originalAmount =
+        widget.bookingData['totalAmount']?.toDouble() ?? widget.totalAmount;
 
-    final payable = _finalAmount; // ✅ Use already discounted amount
-    final balance = walletVM.walletBalance;
+    // Apply promo first
+    final discountedAmount = _appliedPromoCode != null
+        ? (originalAmount - _discountAmount)
+        : originalAmount;
 
-    if (balance >= payable) {
-      _walletUsed = payable;
-      _finalAmount = 0;
+    // Then apply wallet
+    if (_useWallet && walletVM.walletBalance > 0) {
+      final availableBalance = walletVM.walletBalance;
+
+      if (availableBalance >= discountedAmount) {
+        _walletUsed = discountedAmount;
+        _finalAmount = 0.0;
+      } else {
+        _walletUsed = availableBalance;
+        _finalAmount = discountedAmount - availableBalance;
+      }
     } else {
-      _walletUsed = balance;
-      _finalAmount = payable - balance;
+      _walletUsed = 0.0;
+      _finalAmount = discountedAmount;
     }
+
+    print('💰 Amount calculation:');
+    print('   Original: $originalAmount');
+    print('   Discounted: $discountedAmount');
+    print('   Wallet used: $_walletUsed');
+    print('   Final amount: $_finalAmount');
+
+    setState(() {});
+  }
+
+  Widget _buildWalletUsageSection(WalletViewModel walletVM) {
+    final isWalletEmpty = walletVM.walletBalance <= 0;
+
+    return Container(
+      margin: const EdgeInsets.only(top: 16),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.blue.shade50,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.blue.shade200),
+      ),
+      child: Column(
+        children: [
+          Row(
+            children: [
+              Checkbox(
+                value: _useWallet && !isWalletEmpty,
+                onChanged: isWalletEmpty
+                    ? null // ✅ Disable if balance empty
+                    : (value) {
+                        setState(() {
+                          _useWallet = value ?? false;
+                        });
+                        _calculateAmounts(walletVM);
+                      },
+                activeColor: Colors.blue.shade600,
+              ),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Use Wallet Balance',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
+                        color: isWalletEmpty
+                            ? Colors.grey
+                            : Colors.blue.shade700,
+                      ),
+                    ),
+                    Text(
+                      isWalletEmpty
+                          ? 'Wallet is empty'
+                          : 'Available: ₹${walletVM.walletBalance.toStringAsFixed(2)}',
+                      style: TextStyle(
+                        fontSize: 14,
+                        color: isWalletEmpty
+                            ? Colors.red.shade400
+                            : Colors.blue.shade600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+
+          if (_useWallet && _walletUsed > 0 && !isWalletEmpty) ...[
+            const SizedBox(height: 8),
+            Divider(color: Colors.blue.shade300, thickness: 1),
+            const SizedBox(height: 8),
+
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  'Wallet Usage:',
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w500,
+                    color: Colors.blue.shade700,
+                  ),
+                ),
+                Text(
+                  '₹${_walletUsed.toStringAsFixed(2)}',
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.blue.shade700,
+                  ),
+                ),
+              ],
+            ),
+
+            if (_finalAmount > 0)
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    'Remaining to pay:',
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w500,
+                      color: Colors.orange.shade700,
+                    ),
+                  ),
+                  Text(
+                    '₹${_finalAmount.toStringAsFixed(2)}',
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.orange.shade700,
+                    ),
+                  ),
+                ],
+              ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  void _recalculateWithWallet(WalletViewModel walletVM) {
+    print('🔄 Recalculating with wallet...');
+    print('   Current _walletUsed: $_walletUsed');
+    print('   Current _finalAmount: $_finalAmount');
+    print('   Wallet balance: ${walletVM.walletBalance}');
+
+    // Reset wallet calculations
+    _walletUsed = 0.0;
+
+    // Start with the discounted amount (after promo codes)
+    double payableAmount = _appliedPromoCode != null
+        ? (widget.bookingData['totalAmount']?.toDouble() ??
+                  widget.totalAmount) -
+              _discountAmount
+        : (widget.bookingData['totalAmount']?.toDouble() ?? widget.totalAmount);
+
+    final balance = walletVM.walletBalance ?? 0.0;
+
+    print('   Payable amount: $payableAmount');
+    print('   Available balance: $balance');
+
+    if (balance >= payableAmount) {
+      // Full wallet payment
+      _walletUsed = payableAmount;
+      _finalAmount = 0.0;
+      print(
+        '   ✅ Full wallet payment: $_walletUsed used, $_finalAmount remaining',
+      );
+    } else {
+      // Partial wallet payment
+      _walletUsed = balance;
+      _finalAmount = payableAmount - balance;
+      print(
+        '   ⚠️ Partial wallet payment: $_walletUsed used, $_finalAmount remaining',
+      );
+    }
+
     setState(() {});
   }
 
@@ -203,6 +381,7 @@ class _PaymentScreenState extends State<PaymentScreen>
   }
 
   // Apply promo code
+  // Apply promo code
   Future<void> _applyPromoCode() async {
     if (_promoCodeController.text.trim().isEmpty) {
       _showSnackBar('Please enter a promo code', Colors.red);
@@ -216,7 +395,6 @@ class _PaymentScreenState extends State<PaymentScreen>
     try {
       final promoCode = _promoCodeController.text.trim();
 
-      // Fetch promo code from Firestore
       final promoSnapshot = await FirebaseFirestore.instance
           .collection('promotions')
           .where('code', isEqualTo: promoCode)
@@ -229,10 +407,8 @@ class _PaymentScreenState extends State<PaymentScreen>
         return;
       }
 
-      final promoDoc = promoSnapshot.docs.first;
-      final promoData = promoDoc.data();
+      final promoData = promoSnapshot.docs.first.data();
 
-      // Check if promo code is within valid date range
       final startDate = DateTime.parse(promoData['startDate']);
       final endDate = DateTime.parse(promoData['endDate']);
       final now = DateTime.now();
@@ -242,14 +418,13 @@ class _PaymentScreenState extends State<PaymentScreen>
         return;
       }
 
-      // Validate conditions
       final isValid = await _validatePromoConditions(promoData);
       if (!isValid) {
         _showSnackBar('You are not eligible for this promo code', Colors.red);
         return;
       }
 
-      // Calculate discount
+      // Calculate discount only (not final amount)
       final originalAmount =
           widget.bookingData['totalAmount']?.toDouble() ?? widget.totalAmount;
       final discountType = promoData['discountType'] as String;
@@ -261,15 +436,16 @@ class _PaymentScreenState extends State<PaymentScreen>
       } else if (discountType == 'percentage') {
         discount = (originalAmount * discountValue) / 100;
       }
-
-      // Ensure discount doesn't exceed the original amount
       discount = discount > originalAmount ? originalAmount : discount;
 
       setState(() {
         _appliedPromoCode = promoData;
         _discountAmount = discount;
-        _finalAmount = originalAmount - discount;
       });
+
+      // ✅ Recalculate amounts with wallet after applying promo
+      final walletVM = context.read<WalletViewModel>();
+      _calculateAmounts(walletVM);
 
       _showSnackBar('Promo code applied successfully!', Colors.green);
     } catch (e) {
@@ -303,6 +479,7 @@ class _PaymentScreenState extends State<PaymentScreen>
   @override
   Widget build(BuildContext context) {
     final walletVM = context.watch<WalletViewModel>();
+
     return Scaffold(
       backgroundColor: const Color(0xFFF8FAFC),
       appBar: _buildAppBar(context),
@@ -311,7 +488,7 @@ class _PaymentScreenState extends State<PaymentScreen>
         child: SlideTransition(
           position: _slideAnimation,
           child: SingleChildScrollView(
-            padding: const EdgeInsets.all(16.0),
+            padding: const EdgeInsets.all(16),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -874,17 +1051,23 @@ class _PaymentScreenState extends State<PaymentScreen>
     try {
       final doc = await FirebaseFirestore.instance
           .collection('settings')
-          .doc('gst')
+          .doc('landingPage')
           .get();
 
       if (doc.exists) {
         final data = doc.data() as Map<String, dynamic>;
-        return (data['GST'] ?? 3).toDouble();
+        final raw = data['GST'];
+
+        if (raw is int) return raw.toDouble();
+        if (raw is double) return raw;
+        if (raw is String) return double.tryParse(raw) ?? 3.0;
+
+        return 3.0;
       }
-      return 3.0; // Default fallback
+      return 3.0;
     } catch (e) {
-      print('Error fetching GST: $e');
-      return 3.0; // Default fallback
+      print('❌ Error fetching GST: $e');
+      return 3.0;
     }
   }
 
@@ -1214,6 +1397,11 @@ class _PaymentScreenState extends State<PaymentScreen>
   }
 
   Widget _buildPaymentOptions(WalletViewModel walletVM) {
+    // Exclude wallet from manual selection
+    final filteredOptions = paymentOptions
+        .where((option) => option.id != 'wallet')
+        .toList();
+
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
@@ -1238,10 +1426,45 @@ class _PaymentScreenState extends State<PaymentScreen>
               color: Colors.black87,
             ),
           ),
+          _buildWalletUsageSection(walletVM),
           const SizedBox(height: 16),
-          ...paymentOptions.map(
-            (option) => _buildPaymentOption(option, walletVM),
-          ),
+
+          // Show online options only if needed
+          if (_finalAmount > 0) ...[
+            Text(
+              'Select payment method for remaining amount:',
+              style: TextStyle(fontSize: 14, color: Colors.grey.shade600),
+            ),
+            const SizedBox(height: 12),
+            ...filteredOptions.map(
+              (option) => _buildPaymentOption(option, walletVM),
+            ),
+          ] else if (_useWallet && _finalAmount <= 0) ...[
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.green.shade50,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.green.shade200),
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.check_circle, color: Colors.green.shade600),
+                  const SizedBox(width: 12),
+                  const Expanded(
+                    child: Text(
+                      'Full payment will be made from wallet balance',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.green,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
         ],
       ),
     );
@@ -1260,10 +1483,20 @@ class _PaymentScreenState extends State<PaymentScreen>
             ? null
             : () {
                 setState(() {
-                  // Agar dusre method se wallet pe switch kar raha hai tabhi recalc karo
-                  if (selectedPaymentMethod != option.id &&
-                      option.id == 'wallet') {
+                  if (option.id == 'wallet') {
+                    // ✅ Wallet select hua toh recalc
                     _recalculateWithWallet(walletVM);
+                  } else {
+                    // ✅ Wallet se dusre payment pe switch hua toh reset
+                    if (selectedPaymentMethod == 'wallet') {
+                      _walletUsed = 0.0;
+                      _finalAmount = _appliedPromoCode != null
+                          ? (widget.bookingData['totalAmount']?.toDouble() ??
+                                    widget.totalAmount) -
+                                _discountAmount
+                          : (widget.bookingData['totalAmount']?.toDouble() ??
+                                widget.totalAmount);
+                    }
                   }
                   selectedPaymentMethod = option.id;
                 });
@@ -1426,77 +1659,102 @@ class _PaymentScreenState extends State<PaymentScreen>
         ],
       ),
       child: SafeArea(
-        child: Row(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
           children: [
-            Expanded(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
+            if (_useWallet && _walletUsed > 0) ...[
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Text(
-                    _appliedPromoCode != null ? 'Final Amount' : 'Total Amount',
+                    'Wallet Payment:',
                     style: TextStyle(fontSize: 14, color: Colors.grey.shade600),
                   ),
                   Text(
-                    _walletUsed > 0
-                        ? "₹${_finalAmount.toStringAsFixed(2)} (Wallet used ₹${_walletUsed.toStringAsFixed(2)})"
-                        : "₹${_finalAmount.toStringAsFixed(2)}",
+                    '₹${_walletUsed.toStringAsFixed(2)}',
                     style: TextStyle(
-                      fontSize: 20,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.orange.shade600,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.blue.shade600,
                     ),
                   ),
-                  if (_appliedPromoCode != null)
-                    Text(
-                      'You saved ₹${_discountAmount.toStringAsFixed(2)}',
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: Colors.green.shade600,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
                 ],
               ),
-            ),
-            const SizedBox(width: 16),
-            Expanded(
-              flex: 2,
-              child: ElevatedButton(
-                onPressed:
-                    selectedPaymentMethod != null &&
-                        !isProcessingPayment &&
-                        !_isNavigating
-                    ? () => _processPayment(context, walletVM)
-                    : null,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.orange.shade600,
-                  padding: const EdgeInsets.symmetric(vertical: 16),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  elevation: 2,
-                ),
-                child: isProcessingPayment || _isNavigating
-                    ? const SizedBox(
-                        height: 20,
-                        width: 20,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          valueColor: AlwaysStoppedAnimation<Color>(
-                            Colors.white,
-                          ),
-                        ),
-                      )
-                    : const Text(
-                        'Pay Now',
+              const SizedBox(height: 4),
+            ],
+            Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        _finalAmount > 0 ? 'Amount to Pay' : 'Total Amount',
                         style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
+                          fontSize: 14,
+                          color: Colors.grey.shade600,
                         ),
                       ),
-              ),
+                      Text(
+                        '₹${_finalAmount.toStringAsFixed(2)}',
+                        style: TextStyle(
+                          fontSize: 20,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.orange.shade600,
+                        ),
+                      ),
+                      if (_appliedPromoCode != null)
+                        Text(
+                          'You saved ₹${_discountAmount.toStringAsFixed(2)}',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.green.shade600,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  flex: 2,
+                  child: ElevatedButton(
+                    onPressed:
+                        (_finalAmount <= 0 || selectedPaymentMethod != null) &&
+                            !isProcessingPayment &&
+                            !_isNavigating
+                        ? () => _processPayment(context, walletVM)
+                        : null,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.orange.shade600,
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      elevation: 2,
+                    ),
+                    child: isProcessingPayment || _isNavigating
+                        ? const SizedBox(
+                            height: 20,
+                            width: 20,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              valueColor: AlwaysStoppedAnimation<Color>(
+                                Colors.white,
+                              ),
+                            ),
+                          )
+                        : Text(
+                            _finalAmount <= 0 ? 'Pay with Wallet' : 'Pay Now',
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                  ),
+                ),
+              ],
             ),
           ],
         ),
@@ -1504,11 +1762,16 @@ class _PaymentScreenState extends State<PaymentScreen>
     );
   }
 
-  void _processPayment(BuildContext context, WalletViewModel walletVM) async {
-    if (selectedPaymentMethod == null || _isNavigating) {
+  Future<void> _processPayment(
+    BuildContext context,
+    WalletViewModel walletVM,
+  ) async {
+    if (_finalAmount > 0 && selectedPaymentMethod == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Please select a payment method'),
+          content: Text(
+            'Please select a payment method for the remaining amount',
+          ),
           backgroundColor: Colors.red,
         ),
       );
@@ -1526,107 +1789,90 @@ class _PaymentScreenState extends State<PaymentScreen>
       final passengerContact =
           widget.bookingData['passengerContact'] ?? widget.passengerContact;
 
-      // ✅ Update booking data with final amount + promo info
-      Map<String, dynamic> updatedBookingData = Map.from(widget.bookingData);
-      updatedBookingData['originalAmount'] =
-          widget.bookingData['totalAmount']?.toDouble() ?? widget.totalAmount;
-      updatedBookingData['finalAmount'] = _finalAmount;
+      final updatedBookingData = {
+        ...widget.bookingData,
+        'originalAmount':
+            widget.bookingData['totalAmount']?.toDouble() ?? widget.totalAmount,
+        'finalAmount': _finalAmount,
+        'walletUsed': _walletUsed,
+        if (_appliedPromoCode != null) ...{
+          'promoCode': _appliedPromoCode!['code'],
+          'discountAmount': _discountAmount,
+          'promoDetails': _appliedPromoCode,
+        },
+      };
 
-      if (_appliedPromoCode != null) {
-        updatedBookingData['promoCode'] = _appliedPromoCode!['code'];
-        updatedBookingData['discountAmount'] = _discountAmount;
-        updatedBookingData['promoDetails'] = _appliedPromoCode;
-      }
+      if (_finalAmount <= 0 && _useWallet) {
+        // Full wallet payment - deduct wallet amount first
+        final success = await walletVM.deductFromWallet(_walletUsed);
+        if (!success) throw Exception("Wallet deduction failed");
 
-      widget.viewModel.setTotalAmount(_finalAmount);
+        widget.viewModel.setTotalAmount(_walletUsed);
 
-      if (selectedPaymentMethod == 'wallet') {
-        if (_walletUsed == 0) {
-          _recalculateWithWallet(walletVM);
-        }
-        final balance = walletVM.walletBalance;
-
-        if (_finalAmount == 0 && _walletUsed > 0) {
-          final success = await walletVM.deductFromWallet(_walletUsed);
-          if (success) {
-            final bookingsVM = Provider.of<BookingsViewModel>(
-              context,
-              listen: false,
-            );
-            final bookingId = await widget.viewModel.saveBooking(
-              context,
-              bookingsVM,
-              {...updatedBookingData, "walletUsed": _walletUsed},
-              paymentMethod: 'Wallet',
-            );
-
-            if (bookingId != null && mounted) {
-              setState(() {
-                isProcessingPayment = false;
-                _isNavigating = false;
-              });
-              _showPaymentSuccessDialog(context, bookingId);
-              return;
-            } else {
-              throw Exception("Booking failed after wallet payment");
-            }
-          } else {
-            throw Exception("Wallet deduction failed");
-          }
-        } else {
+        await widget.viewModel.initiateWalletPayment(
+          context,
+          passengerName,
+          passengerContact,
+          _getEmailForPayment(),
+          {
+            ...updatedBookingData,
+            "totalAmount": _walletUsed,
+            "finalAmount": 0.0,
+            "paymentMethod": "Wallet",
+          },
+          walletVM,
+        );
+      } else {
+        // Hybrid payment or full online payment
+        if (_useWallet && _walletUsed > 0) {
+          // Deduct wallet amount first for hybrid payment
           final success = await walletVM.deductFromWallet(_walletUsed);
           if (!success) throw Exception("Wallet deduction failed");
-
-          await widget.viewModel.initiatePayment(
-            context,
-            passengerName,
-            passengerContact,
-            _getEmailForPayment(),
-            {
-              ...updatedBookingData,
-              "walletUsed": _walletUsed,
-              "finalAmount": _finalAmount,
-            },
-          );
-
-          if (mounted) {
-            setState(() {
-              isProcessingPayment = false;
-              _isNavigating = true;
-            });
-          }
         }
-      } else {
+
+        // Set the remaining amount (after wallet deduction) for Cashfree
+        widget.viewModel.setTotalAmount(_finalAmount);
+
         await widget.viewModel.initiatePayment(
           context,
           passengerName,
           passengerContact,
           _getEmailForPayment(),
-          updatedBookingData,
+          {
+            ...updatedBookingData,
+            'totalAmount':
+                _finalAmount, // This is the key fix - pass remaining amount
+          },
         );
+      }
 
-        if (mounted) {
-          setState(() {
-            isProcessingPayment = false;
-            _isNavigating = true;
-          });
-        }
+      if (mounted) {
+        setState(() {
+          isProcessingPayment = false;
+          _isNavigating = true;
+        });
       }
     } catch (e) {
-      print('❌ Payment error: $e');
+      // If wallet deduction happened but payment failed, we should refund
+      if (_useWallet && _walletUsed > 0) {
+        try {
+          await walletVM.addToWallet(_walletUsed, 'Refund for failed payment');
+        } catch (refundError) {
+          print('Failed to refund wallet amount: $refundError');
+        }
+      }
+
       if (mounted) {
+        setState(() {
+          isProcessingPayment = false;
+          _isNavigating = false;
+        });
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Payment failed: $e'),
             backgroundColor: Colors.red,
           ),
         );
-      }
-    } finally {
-      if (mounted && isProcessingPayment) {
-        setState(() {
-          isProcessingPayment = false;
-        });
       }
     }
   }

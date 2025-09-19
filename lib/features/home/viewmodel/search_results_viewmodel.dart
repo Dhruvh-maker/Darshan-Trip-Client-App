@@ -60,6 +60,8 @@ class SearchResultsViewModel extends ChangeNotifier {
     notifyListeners();
 
     try {
+      print("🔍 Starting trip search for: $_sourceCity -> $_destinationCity");
+
       // Step 1: Find matching startPoints and destinations
       String? startPointId = await _findStartPointId(_sourceCity);
       String? destinationId = await _findDestinationId(_destinationCity);
@@ -103,13 +105,17 @@ class SearchResultsViewModel extends ChangeNotifier {
       final selectedDateString = DateFormat('yyyy-MM-dd').format(_selectedDate);
       final currentDay = DateFormat('EEEE').format(_selectedDate).toLowerCase();
 
+      print("🗓️ Selected date: $selectedDateString, Day: $currentDay");
+
       for (var tripDoc in tripsSnapshot.docs) {
         final tripData = tripDoc.data();
         final busId = tripData['busId'] as String;
         final tripId = tripDoc.id;
 
+        print("\n🚌 Processing trip: $tripId with busId: $busId");
+
         try {
-          // Get bus details
+          // Get bus details from buses collection
           final busDoc = await FirebaseFirestore.instance
               .collection('buses')
               .doc(busId)
@@ -121,6 +127,11 @@ class SearchResultsViewModel extends ChangeNotifier {
           }
 
           final busData = busDoc.data()!;
+          final actualBusId = busDoc.id; // Firestore document ID
+
+          print(
+            "📝 Bus found: ${busData['name'] ?? 'Unknown'} (ID: $actualBusId)",
+          );
 
           // Check if bus is running on selected day
           final offDays =
@@ -130,20 +141,24 @@ class SearchResultsViewModel extends ChangeNotifier {
               [];
 
           if (offDays.contains(currentDay)) {
-            print('⏸️ Bus $busId is off on $currentDay');
+            print('⏸️ Bus $actualBusId is off on $currentDay');
             continue;
           }
 
           // Calculate total seats from layout
           int totalSeats = _calculateTotalSeats(busData);
           if (totalSeats == 0) {
-            totalSeats = busData['totalSeat'] ?? 0;
+            totalSeats = (busData['totalSeat'] as num?)?.toInt() ?? 40;
           }
+          print("🪑 Total seats: $totalSeats");
 
-          // Fetch confirmed bookings for this trip & date
+          // Fetch confirmed bookings for this bus & date & trip
           final bookingsSnapshot = await FirebaseFirestore.instance
               .collection('bookings')
-              .where('tripId', isEqualTo: tripId) // Use tripId instead of busId
+              .where(
+                'busId',
+                isEqualTo: actualBusId,
+              ) // Use actual bus document ID
               .where('bookingDate', isEqualTo: selectedDateString)
               .where('status', isEqualTo: 'confirmed')
               .get();
@@ -151,15 +166,21 @@ class SearchResultsViewModel extends ChangeNotifier {
           List<int> bookedSeats = [];
           for (var booking in bookingsSnapshot.docs) {
             final bookingData = booking.data();
-            bookedSeats.addAll(
-              (bookingData['seats'] as List<dynamic>? ?? []).map(
-                (s) => s as int,
-              ),
-            );
+            final seats = (bookingData['seats'] as List<dynamic>? ?? []);
+            for (var seat in seats) {
+              if (seat is int) {
+                bookedSeats.add(seat);
+              } else if (seat is String) {
+                final seatNum = int.tryParse(seat);
+                if (seatNum != null) bookedSeats.add(seatNum);
+              }
+            }
           }
 
           final bookedSeatsCount = bookedSeats.length;
           final availableSeats = totalSeats - bookedSeatsCount;
+
+          print("📊 Booked: $bookedSeatsCount, Available: $availableSeats");
 
           // Skip if no seats available
           if (availableSeats <= 0) {
@@ -167,65 +188,105 @@ class SearchResultsViewModel extends ChangeNotifier {
             continue;
           }
 
-          // Fetch fares for this bus/trip
-          final faresSnapshot = await FirebaseFirestore.instance
-              .collection('fares')
-              .where('busId', isEqualTo: busId)
-              .get();
+          // Fetch fares for this bus to determine starting price
+          int startingPrice = (busData['ticketPrice'] as num?)?.toInt() ?? 500;
 
-          int startingPrice = busData['ticketPrice'] ?? 500;
-          if (faresSnapshot.docs.isNotEmpty) {
-            final seatPrices = faresSnapshot.docs
-                .map((d) => (d.data()['price'] ?? startingPrice) as int)
-                .toList();
-            if (seatPrices.isNotEmpty) {
-              startingPrice = seatPrices.reduce((a, b) => a < b ? a : b);
+          try {
+            final faresSnapshot = await FirebaseFirestore.instance
+                .collection('fares')
+                .where('busId', isEqualTo: actualBusId)
+                .get();
+
+            if (faresSnapshot.docs.isNotEmpty) {
+              final seatPrices = <int>[];
+              for (var fareDoc in faresSnapshot.docs) {
+                final fareData = fareDoc.data();
+                final price = (fareData['price'] as num?)?.toInt();
+                if (price != null) seatPrices.add(price);
+              }
+
+              if (seatPrices.isNotEmpty) {
+                startingPrice = seatPrices.reduce((a, b) => a < b ? a : b);
+                print("💰 Starting price from fares: ₹$startingPrice");
+              }
+            } else {
+              print("💰 No fares found, using default: ₹$startingPrice");
             }
+          } catch (e) {
+            print("❌ Error fetching fares: $e");
           }
 
           final singleSeats = _calculateSingleSeats(busData);
 
-          // Build final bus/trip object
-          busList.add({
-            'id': busId,
-            'tripId': tripId, // Add trip ID for booking reference
+          // Build final bus/trip object with all required data
+          final busResult = {
+            // Bus identification
+            '_id': actualBusId, // Firestore buses collection document ID
+            'id': actualBusId, // Backward compatibility
+            'tripId': tripId, // Trip document ID
+            // Bus basic info
+            'busName': busData['name'] ?? busData['busNumber'] ?? 'Unknown Bus',
+            'busNumber': busData['busNumber'] ?? '',
+            'busType': _getBusType(busData),
+            'rating': (busData['rating'] as num?)?.toDouble() ?? 4.0,
+            'reviewCount': (busData['reviewCount'] as num?)?.toInt() ?? 0,
+            'isNewBus': busData['isNewBus'] == true,
+
+            // Bus features
+            'hasAC': busData['hasAC'] == true,
+            'hasSleeper': busData['isSleeper'] == true,
+            'isLuxury': busData['isLuxury'] == true,
+            'facilities': List<String>.from(busData['facilities'] ?? []),
+
+            // Seat information
+            'totalSeats': totalSeats,
+            'availableSeats': availableSeats,
+            'bookedSeats': bookedSeats,
+            'singleSeats': singleSeats,
+            'seats': '$availableSeats Seats ($singleSeats Single)',
+
+            // Pricing
+            'price': '₹$startingPrice',
+            'ticketPrice': startingPrice, // For calculations
+            // Timing from trip data
+            'departureTime': tripData['startPointTime'] ?? '06:00',
+            'arrivalTime': tripData['dropPointTime'] ?? '13:30',
+            'duration': '${tripData['journeyDuration'] ?? 7}h 30m',
+
+            // Seat layouts (important for BusDetailViewModel)
+            'seatLayout': busData['seatLayout'],
+            'lowerSeatLayout': busData['lowerSeatLayout'],
+            'upperSeatLayout': busData['upperSeatLayout'],
+            'totalDecker': busData['totalDecker'] ?? 'single',
+            'totalSeat': totalSeats,
+            'isSleeper': busData['isSleeper'] == true,
+
+            // Driver info
+            'driverId': busData['driverId'],
+            'driverMobile': busData['driverMobile'],
+
+            // Operator info for UI
             'operatorGroup': {
               'name': busData['name'] ?? 'Unknown Bus',
               'subtitle': 'Bus Operator',
               'busCount': 1,
               'startingPrice': '₹$startingPrice',
             },
-            'departureTime': tripData['startPointTime'] ?? '06:00',
-            'arrivalTime': tripData['dropPointTime'] ?? '13:30',
-            'duration': '${tripData['journeyDuration'] ?? 7}h 30m',
-            'totalSeats': totalSeats,
-            'availableSeats': availableSeats,
-            'bookedSeats': bookedSeats,
-            'singleSeats': singleSeats,
-            'seats': '$availableSeats Seats ($singleSeats Single)',
-            'busName': busData['name'] ?? busData['busNumber'] ?? 'Unknown Bus',
-            'busNumber': busData['busNumber'] ?? '',
-            'busType': _getBusType(busData),
-            'price': '₹$startingPrice',
-            'rating': (busData['rating'] as num?)?.toDouble() ?? 4.0,
-            'reviewCount': busData['reviewCount'] ?? 0,
-            'isNewBus': busData['isNewBus'] ?? false,
-            'hasAC': busData['hasAC'] ?? false,
-            'hasSleeper': busData['isSleeper'] ?? false,
-            'isLuxury': busData['isLuxury'] ?? false,
-            'facilities': List<String>.from(busData['facilities'] ?? []),
-            'seatLayout': busData['seatLayout'],
-            'driverMobile': busData['driverMobile'],
-            'totalDecker': busData['totalDecker'] ?? 'single',
+
             // Trip specific data
             'tripTitle': tripData['title'] ?? 'Unknown Trip',
             'pickupPoints': tripData['pickupPoints'] ?? [],
             'dynamicPricing': tripData['dynamicPricing'] ?? [],
             'liveStatus': tripData['liveStatus'] ?? 'inactive',
-          });
 
+            // Route info for BusDetailViewModel
+            'from': _sourceCity,
+            'to': _destinationCity,
+          };
+
+          busList.add(busResult);
           print(
-            '✅ Added trip: ${tripData['title']} with $availableSeats available seats',
+            '✅ Added bus: ${busResult['busName']} with $availableSeats available seats',
           );
         } catch (e) {
           print('❌ Error processing trip $tripId: $e');
@@ -235,7 +296,10 @@ class SearchResultsViewModel extends ChangeNotifier {
 
       _busResults = busList;
       _filteredBusResults = List.from(_busResults);
-      print('✅ Total trip results: ${_busResults.length}');
+      print('\n🎯 Final Results: ${_busResults.length} buses found');
+
+      // Apply any existing filters
+      _applyFilters();
     } catch (e) {
       print('❌ Error fetching trip data: $e');
       _busResults = [];

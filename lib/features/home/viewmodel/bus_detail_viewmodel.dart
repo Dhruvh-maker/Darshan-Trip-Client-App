@@ -80,6 +80,11 @@ class BusDetailViewModel extends ChangeNotifier {
     this.sourceCity,
     this.destinationCity,
   }) {
+    print("🔍 Constructor - Bus data received:");
+    print("   id: ${bus['id']}");
+    print("   _id: ${bus['_id']}");
+    print("   tripId: ${bus['tripId']}");
+
     _validateBusData();
     _initializeSeats();
     _fetchAndUpdateBookedSeats();
@@ -132,31 +137,41 @@ class BusDetailViewModel extends ChangeNotifier {
 
   Future<void> fetchAndApplySeatFares() async {
     try {
-      final busId = bus['id']?.toString();
-      if (busId == null || busId.isEmpty) return;
-
-      // Get current tripId if available
+      // ✅ Use _id for busId (Firestore buses collection का actual ID)
+      final busId = bus['_id']?.toString();
       final tripId = bus['tripId']?.toString();
 
-      // Query fares collection for this bus
-      Query fareQuery = FirebaseFirestore.instance
+      print("🔍 Fetching fares with:");
+      print("   busId: $busId");
+      print("   tripId: $tripId");
+
+      if (busId == null || busId.isEmpty) {
+        print("❌ Missing busId for fares query");
+        return;
+      }
+
+      // Query fares collection
+      Query faresQuery = FirebaseFirestore.instance
           .collection('fares')
           .where('busId', isEqualTo: busId);
 
-      // If tripId is available, also filter by tripId for more specific pricing
+      // Add tripId filter if available
       if (tripId != null && tripId.isNotEmpty) {
-        fareQuery = fareQuery.where('tripId', isEqualTo: tripId);
+        faresQuery = faresQuery.where('tripId', isEqualTo: tripId);
       }
 
-      final faresSnapshot = await fareQuery.get();
+      final faresSnapshot = await faresQuery.get();
+
+      print("📊 Fares query results: ${faresSnapshot.docs.length} documents");
 
       _seatFares.clear();
 
-      // Build seat fare lookup map
       for (var fareDoc in faresSnapshot.docs) {
         final fareData = fareDoc.data() as Map<String, dynamic>;
-        final seatNumber = fareData['seatNumber']?.toString();
+        final seatNumber = fareData['seatNumber']?.toString().trim();
         final price = fareData['price'];
+
+        print("   Fare doc: seatNumber=$seatNumber, price=$price");
 
         if (seatNumber != null && price != null) {
           _seatFares[seatNumber] = (price as num).toDouble();
@@ -164,9 +179,13 @@ class BusDetailViewModel extends ChangeNotifier {
       }
 
       print("✅ Seat-specific fares loaded: ${_seatFares.length} seats");
-      print("📊 Fare data: $_seatFares");
+      print("📊 Final fare data: $_seatFares");
 
-      // Update seat prices in both lower and upper deck layouts
+      if (_seatFares.isEmpty) {
+        print("⚠️ No fares found. Using default price from bus data.");
+      }
+
+      // Update seat layout prices
       _updateSeatPrices(_seatData);
       if (_isDoubleDecker) {
         _updateSeatPrices(_upperSeatData);
@@ -182,14 +201,25 @@ class BusDetailViewModel extends ChangeNotifier {
   void _updateSeatPrices(List<Map<String, dynamic>> seatLayout) {
     final defaultPrice = (bus['ticketPrice'] as num?)?.toDouble() ?? 500.0;
 
+    print("🔄 Updating seat prices. Default price: $defaultPrice");
+
     for (var seat in seatLayout) {
       if (seat['type'] == 'seat') {
-        final seatNumber = seat['seatNumber']?.toString();
-        if (seatNumber != null) {
-          // Use specific fare if available, otherwise use default price
-          seat['price'] = _seatFares[seatNumber] ?? defaultPrice;
+        final seatNumber = seat['seatNumber']?.toString().trim();
+
+        if (seatNumber != null && seatNumber.isNotEmpty) {
+          if (_seatFares.containsKey(seatNumber)) {
+            seat['price'] = _seatFares[seatNumber];
+            print(
+              "   Seat $seatNumber: ₹${_seatFares[seatNumber]} (from fares)",
+            );
+          } else {
+            seat['price'] = defaultPrice;
+            print("   Seat $seatNumber: ₹$defaultPrice (default)");
+          }
         } else {
           seat['price'] = defaultPrice;
+          print("   Invalid seat number, using default: ₹$defaultPrice");
         }
       }
     }
@@ -375,8 +405,13 @@ class BusDetailViewModel extends ChangeNotifier {
   // Fetch Fare details for this bus
   Future<void> fetchBusFares() async {
     try {
-      final busId = bus['id']?.toString();
-      if (busId == null || busId.isEmpty) return;
+      final busId = bus['_id']?.toString(); // ✅ use _id, not id
+      if (busId == null || busId.isEmpty) {
+        print("❌ No busId found for fares query");
+        return;
+      }
+
+      print("🔍 Fetching bus fares for busId: $busId");
 
       final snapshot = await FirebaseFirestore.instance
           .collection('fares')
@@ -386,6 +421,7 @@ class BusDetailViewModel extends ChangeNotifier {
       _fares = snapshot.docs.map((doc) {
         final data = doc.data();
         data['id'] = doc.id;
+        print("   Fare: ${data['seatNumber']} = ₹${data['price']}");
         return data;
       }).toList();
 
@@ -420,7 +456,7 @@ class BusDetailViewModel extends ChangeNotifier {
   // Fetch current booked seats for this bus on selected date
   Future<List<int>> fetchCurrentBookedSeats(DateTime selectedDate) async {
     try {
-      final busId = bus['id']?.toString();
+      final busId = bus['_id']?.toString(); // ✅ use _id
       if (busId == null) return [];
 
       final selectedDateString = DateFormat('yyyy-MM-dd').format(selectedDate);
@@ -451,7 +487,7 @@ class BusDetailViewModel extends ChangeNotifier {
   Future<void> _fetchAndUpdateBookedSeats() async {
     final DateTime selectedDate = _selectedDate;
     try {
-      final busId = bus['id']?.toString();
+      final busId = bus['_id']?.toString(); // ✅ use _id
       if (busId == null) return;
 
       final selectedDateString = DateFormat('yyyy-MM-dd').format(selectedDate);
@@ -1274,7 +1310,15 @@ class BusDetailViewModel extends ChangeNotifier {
 
       print('🔄 Starting payment process...');
 
-      final paymentAmount = bookingData['totalAmount'] ?? _totalAmount;
+      final paymentAmount =
+          bookingData['finalAmount']?.toDouble() ??
+          bookingData['totalAmount']?.toDouble() ??
+          _totalAmount;
+
+      print('💰 Payment amount for Cashfree: $paymentAmount');
+      print('📊 Original amount: ${bookingData['totalAmount']}');
+      print('🎯 Final amount: ${bookingData['finalAmount']}');
+      print('💳 Wallet used: ${bookingData['walletUsed'] ?? 0}');
 
       if (paymentAmount <= 0) {
         throw Exception("Invalid payment amount: $paymentAmount");
@@ -1282,7 +1326,6 @@ class BusDetailViewModel extends ChangeNotifier {
 
       final orderId = 'ORDER_${DateTime.now().millisecondsSinceEpoch}';
 
-      // Fetch appId and secret key
       final appId = await CashfreeConfig.getAppId();
       final secretKey = await CashfreeConfig.getSecretKey();
 
@@ -1303,9 +1346,7 @@ class BusDetailViewModel extends ChangeNotifier {
       print('✅ Session ID received: $sessionId');
 
       final session = CFSessionBuilder()
-          .setEnvironment(
-            CFEnvironment.SANDBOX,
-          ) // TODO: change to PRODUCTION later
+          .setEnvironment(CFEnvironment.SANDBOX) // TODO: switch to PRODUCTION
           .setOrderId(orderId)
           .setPaymentSessionId(sessionId)
           .build();
@@ -1315,7 +1356,6 @@ class BusDetailViewModel extends ChangeNotifier {
           .build();
 
       final cfService = CFPaymentGatewayService();
-
       bool paymentCompleted = false;
 
       cfService.setCallback(
@@ -1350,18 +1390,29 @@ class BusDetailViewModel extends ChangeNotifier {
               throw Exception("Booking failed after payment");
             }
           } catch (e) {
+            // Refund wallet if booking fails after successful payment
+            final walletUsed = (bookingData['walletUsed'] ?? 0).toDouble();
+            if (walletUsed > 0) {
+              final walletVM = Provider.of<WalletViewModel>(
+                context,
+                listen: false,
+              );
+              await walletVM.addToWallet(walletUsed, "Refund: Booking failed");
+              print("💸 Refunded ₹$walletUsed due to booking failure");
+            }
+
             isProcessingPayment = false;
             _isNavigating = false;
             notifyListeners();
             print('❌ Error saving booking after payment: $e');
             _showSnack(
               context,
-              "Payment successful but booking failed: $e",
+              "Payment success but booking failed: $e",
               Colors.red,
             );
           }
         },
-        (CFErrorResponse error, String? failedOrderId) {
+        (CFErrorResponse error, String? failedOrderId) async {
           if (paymentCompleted) return;
           paymentCompleted = true;
 
@@ -1369,10 +1420,22 @@ class BusDetailViewModel extends ChangeNotifier {
           _isNavigating = false;
           notifyListeners();
 
-          print('❌ Payment failed: ${error.getMessage()}');
+          print('❌ Payment failed/cancelled: ${error.getMessage()}');
+
+          // Refund wallet if used
+          final walletUsed = (bookingData['walletUsed'] ?? 0).toDouble();
+          if (walletUsed > 0) {
+            final walletVM = Provider.of<WalletViewModel>(
+              context,
+              listen: false,
+            );
+            await walletVM.addToWallet(walletUsed, "Refund: Payment failed");
+            print("💸 Refunded ₹$walletUsed due to failed/cancelled payment");
+          }
+
           _showSnack(
             context,
-            "Payment failed: ${error.getMessage()}",
+            "Payment failed or cancelled: ${error.getMessage()}",
             Colors.red,
           );
         },
@@ -1381,6 +1444,17 @@ class BusDetailViewModel extends ChangeNotifier {
       print('🚀 Launching payment gateway...');
       await cfService.doPayment(cfWebCheckout);
     } catch (e) {
+      // Refund if crash happened before launching payment
+      final walletUsed = (bookingData['walletUsed'] ?? 0).toDouble();
+      if (walletUsed > 0) {
+        final walletVM = Provider.of<WalletViewModel>(context, listen: false);
+        await walletVM.addToWallet(
+          walletUsed,
+          "Refund: Payment initiation error",
+        );
+        print("💸 Refunded ₹$walletUsed due to initiation error");
+      }
+
       isProcessingPayment = false;
       _isNavigating = false;
       notifyListeners();
@@ -1401,7 +1475,12 @@ class BusDetailViewModel extends ChangeNotifier {
       isProcessingPayment = true;
       notifyListeners();
 
-      final paymentAmount = bookingData['totalAmount'] ?? _totalAmount;
+      final paymentAmount =
+          bookingData['totalAmount']?.toDouble() ?? _totalAmount;
+
+      print('🎯 Wallet Payment Initiated:');
+      print('   Payment amount: $paymentAmount');
+      print('   Wallet balance: ${walletViewModel.walletBalance}');
 
       if (paymentAmount <= 0) {
         throw Exception("Invalid payment amount: $paymentAmount");
@@ -1419,12 +1498,20 @@ class BusDetailViewModel extends ChangeNotifier {
         return;
       }
 
+      // Deduct from wallet
+      final deductionSuccess = await walletViewModel.deductFromWallet(
+        paymentAmount,
+      );
+      if (!deductionSuccess) {
+        throw Exception("Failed to deduct amount from wallet");
+      }
+
+      print('✅ Wallet deduction successful. Creating booking...');
+
       final bookingsViewModel = Provider.of<BookingsViewModel>(
         context,
         listen: false,
       );
-
-      await walletViewModel.deductFromWallet(paymentAmount);
 
       final bookingId = await saveBooking(
         context,
@@ -1439,10 +1526,17 @@ class BusDetailViewModel extends ChangeNotifier {
         _isNavigating = false;
         notifyListeners();
 
+        print('✅ Wallet payment completed. Booking ID: $bookingId');
+
         if (context.mounted) {
           _showPaymentSuccessDialog(context, bookingId);
         }
       } else {
+        // Refund wallet if booking fails
+        await walletViewModel.addToWallet(
+          paymentAmount,
+          "Refund: Booking failed after wallet payment",
+        );
         throw Exception("Booking failed after wallet payment");
       }
     } catch (e) {
@@ -1450,6 +1544,17 @@ class BusDetailViewModel extends ChangeNotifier {
       _isNavigating = false;
       notifyListeners();
       print('❌ Wallet payment error: $e');
+
+      // Safe refund in case of crash/error
+      final amount = bookingData['totalAmount']?.toDouble() ?? _totalAmount;
+      if (amount > 0) {
+        await walletViewModel.addToWallet(
+          amount,
+          "Refund: Wallet payment error",
+        );
+        print("💸 Refunded ₹$amount due to wallet payment error");
+      }
+
       _showSnack(context, "Wallet payment failed: $e", Colors.red);
     }
   }
